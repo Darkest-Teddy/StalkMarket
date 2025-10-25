@@ -1,434 +1,734 @@
-const API_BASE = window.location.origin;
-const UPDATE_INTERVAL = 3000;
+/* STALK Market Frontend – connects to FarmFinance FastAPI
+ * Gameplay loop: plan -> simulate (season) -> trade -> Monte Carlo peek -> report
+ * State is client-side (localStorage) for hackathon simplicity.
+ */
 
-let currentPlantId = null;
-let plantConfigs = [];
-let modalChart = null;
-let portfolioData = null;
+const API = () => window.API_BASE || 'http://localhost:8000';
 
-async function fetchAPI(endpoint) {
-    const response = await fetch(`${API_BASE}${endpoint}`);
-    if (!response.ok) {
-        throw new Error(`API error: ${response.statusText}`);
-    }
-    return response.json();
+// ---------- Global State ----------
+const state = {
+  seasonId: null,
+  prices: {},     // {cropId: [prices...]}
+  crops: [],      // cropIds
+  events: [],
+  macro: {},
+  cash: 10000,
+  holdings: {},   // {cropId: qty}
+  txns: [],
+  charts: {},
+  fullHistory: {},   // complete price history per crop
+  currentStep: 0,
+  maxStep: 0,
+  tickIntervalMs: 10000,
+  timerId: null,
+  timerRunning: false,
+  costBasis: {},
+  extending: false,
+  timelineComplete: false,
+};
+
+const CROPS_META = {
+  wheat: {
+    name: 'Golden Wheat',
+    emoji: '🌾',
+    tagline: 'Steady bond-like staple',
+  },
+  corn: {
+    name: 'Sunrise Corn',
+    emoji: '🌽',
+    tagline: 'Blue-chip harvest with supply swings',
+  },
+  berries: {
+    name: 'Berry Patch',
+    emoji: '🫐',
+    tagline: 'High-growth seasonal favorite',
+  },
+  truffle: {
+    name: 'Truffle Grove',
+    emoji: '🍄',
+    tagline: 'Alt delicacy with rare windfalls',
+  },
+};
+
+// ---------- Utils ----------
+const fmt = (n) => '$' + (n || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const fmtSigned = (n) => {
+  const sign = n >= 0 ? '+' : '-';
+  const mag = Math.abs(n).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  return `${sign}$${mag}`;
+};
+const pct = (x) => ((x >= 0 ? '+' : '') + (100 * x).toFixed(2) + '%');
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  document.getElementById('toast-message').textContent = msg;
+  t.classList.remove('hidden');
+  setTimeout(() => t.classList.add('hidden'), 2600);
 }
 
-async function postAPI(endpoint, data) {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
+function sum(arr){ return arr.reduce((a,b)=>a+b,0); }
+
+// Estimate mu/sigma from history (simple, weekly)
+function estimateParams(prices){
+  const rets = [];
+  for(let i=1;i<prices.length;i++){
+    rets.push((prices[i]-prices[i-1])/(prices[i-1]||1));
+  }
+  const m = rets.length ? rets.reduce((a,b)=>a+b,0)/rets.length : 0.001;
+  const v = rets.length ? Math.sqrt(rets.map(x=> (x-m)**2).reduce((a,b)=>a+b,0)/Math.max(1,rets.length-1)) : 0.02;
+  return {mu: m, sigma: v, seasonality_strength: 0.2};
+}
+
+// Convert portfolio to weights (by market value)
+function portfolioWeights() {
+  const latest = latestPrices();
+  let total = 0;
+  const w = {};
+  for (const cid of state.crops) {
+    const qty = state.holdings[cid] || 0;
+    const p = latest[cid] || 0;
+    total += qty * p;
+  }
+  for (const cid of state.crops) {
+    const qty = state.holdings[cid] || 0;
+    const p = latest[cid] || 0;
+    w[cid] = total > 0 ? (qty * p) / total : 0;
+  }
+  return w;
+}
+
+function latestPrices(){
+  const last = {};
+  for(const cid of state.crops) {
+    const arr = state.prices[cid] || [];
+    last[cid] = arr.length ? arr[arr.length-1] : 0;
+  }
+  return last;
+}
+
+function titleize(id){
+  if(!id) return '';
+  return id.replace(/[_-]/g, ' ').replace(/\b\w/g, (c)=>c.toUpperCase());
+}
+
+function cropMeta(cid){
+  const meta = CROPS_META[cid] || {};
+  return {
+    name: meta.name || titleize(cid),
+    emoji: meta.emoji || '🪴',
+    tagline: meta.tagline || 'Versatile seasonal grower',
+  };
+}
+
+function resetTimeline(){
+  if(state.timerId){
+    clearTimeout(state.timerId);
+    state.timerId = null;
+  }
+  state.timerRunning = false;
+  state.currentStep = 0;
+  state.maxStep = 0;
+  state.timelineComplete = false;
+}
+
+function initTimeline(prices){
+  resetTimeline();
+  state.fullHistory = {};
+  state.prices = {};
+  let max = 0;
+  Object.entries(prices).forEach(([cid, series])=>{
+    const arr = Array.isArray(series) ? [...series] : [];
+    state.fullHistory[cid] = arr;
+    state.prices[cid] = arr.length ? [arr[0]] : [];
+    if(arr.length){
+      max = Math.max(max, arr.length - 1);
+    }
+  });
+  state.currentStep = 0;
+  state.maxStep = max;
+  renderClock();
+}
+
+function renderClock(){
+  const stepEl = document.getElementById('stat-current-step');
+  if(stepEl){
+    stepEl.textContent = state.seasonId ? `Day ${state.currentStep}` : 'Day —';
+  }
+  const statusEl = document.getElementById('stat-clock-status');
+  if(statusEl){
+    let label = 'Paused';
+    let cls = 'text-gray-500';
+    if(state.timelineComplete){
+      label = 'Complete';
+      cls = 'text-amber-600';
+    }else if(state.timerRunning){
+      label = 'Running';
+      cls = 'text-green-600';
+    }
+    statusEl.textContent = label;
+    statusEl.className = `text-xs font-semibold ${cls}`;
+  }
+  const btn = document.getElementById('btn-toggle-clock');
+  if(btn){
+    if(state.timelineComplete){
+      btn.textContent = 'Start New Season';
+    }else{
+      btn.textContent = state.timerRunning ? 'Pause Clock' : 'Resume Clock';
+    }
+  }
+}
+
+function scheduleNextTick(){
+  if(!state.timerRunning) return;
+  if(state.timerId){
+    clearTimeout(state.timerId);
+  }
+  state.timerId = setTimeout(async ()=>{
+    state.timerId = null;
+    await advanceTick();
+    scheduleNextTick();
+  }, state.tickIntervalMs);
+}
+
+function startClock(){
+  if(state.timerRunning || state.timelineComplete) return;
+  state.timerRunning = true;
+  renderClock();
+  scheduleNextTick();
+}
+
+function pauseClock(){
+  state.timerRunning = false;
+  if(state.timerId){
+    clearTimeout(state.timerId);
+    state.timerId = null;
+  }
+  renderClock();
+}
+
+function toggleClock(){
+  if(state.timerRunning){
+    pauseClock();
+  }else{
+    if(state.timelineComplete){
+      toast('Growing a fresh season...');
+      newSeason();
+      return;
+    }
+    startClock();
+  }
+}
+
+// ---------- API Calls ----------
+async function getMacro() {
+  const r = await fetch(`${API()}/macro`);
+  const j = await r.json();
+  return j.macro || j;
+}
+
+async function newSeason() {
+  try{
+    const r = await fetch(`${API()}/demo_seed`, {method: 'POST'});
+    const j = await r.json();
+    if(!j.ok){ toast('Failed to seed demo'); return; }
+    const seasonId = j.season_id || 'S1';
+    document.getElementById('season-id').textContent = seasonId;
+
+    const {prices, crops, events} = await fetchSeasonSnapshot(seasonId);
+    const macro = await getMacro();
+
+    state.seasonId = seasonId;
+    state.crops = crops;
+    state.events = (events || []).slice().sort((a,b)=>a.ts - b.ts);
+    state.macro = macro;
+    state.cash = 10000;
+    state.holdings = {};
+    state.txns = [];
+    state.costBasis = {};
+    initTimeline(prices);
+
+    renderMacro();
+    renderMarket();
+    renderPortfolio();
+    renderEvents();
+    renderTxns();
+    renderClock();
+    startClock();
+    toast('New season started!');
+  }catch(err){
+    console.error(err);
+    toast('Season start failed. Check backend server.');
+  }
+}
+
+async function fetchSeasonSnapshot(seasonId){
+  const r = await fetch(`${API()}/season/${encodeURIComponent(seasonId)}/prices`);
+  if(!r.ok){
+    throw new Error(`season snapshot failed: ${r.status}`);
+  }
+  const j = await r.json();
+  const grouped = {};
+  for(const row of j.prices || []){
+    if(!grouped[row.crop_id]) grouped[row.crop_id] = [];
+    grouped[row.crop_id].push({ts: row.ts, price: row.price});
+  }
+  const prices = {};
+  Object.keys(grouped).forEach((cid)=>{
+    const series = grouped[cid].sort((a,b)=>a.ts-b.ts).map((pt)=>pt.price);
+    prices[cid] = series;
+  });
+  const crops = Object.keys(prices).sort();
+  return {prices, crops, events: j.events || []};
+}
+
+async function runMonteCarlo(){
+  const pricesNow = latestPrices();
+  const weights = portfolioWeights();
+  const cropParams = state.crops.map(cid => {
+    const est = estimateParams(state.prices[cid] || []);
+    return { crop_id: cid, mu: est.mu, sigma: est.sigma, seasonality_strength: est.seasonality_strength, jump_lam: 0.02, jump_mu: 0.0, jump_sig: 0.05 };
+  });
+  const body = { prices_now: pricesNow, weights, crop_params: cropParams, horizon_steps: 12, N: 1000 };
+  const r = await fetch(`${API()}/montecarlo`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const j = await r.json();
+  if(j.percentiles){
+    const p = j.percentiles["p5,p25,p50,p75,p95"];
+    toast(`Monte Carlo wealth x-multiple: p5=${p[0].toFixed(2)}, p50=${p[2].toFixed(2)}, p95=${p[4].toFixed(2)}`);
+  } else {
+    toast('Monte Carlo failed');
+  }
+}
+
+async function extendSeason(steps = 12){
+  if(!state.seasonId) return null;
+  const r = await fetch(`${API()}/season/${encodeURIComponent(state.seasonId)}/advance`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({steps})
+  });
+  if(!r.ok){
+    throw new Error(`extend failed: ${r.status}`);
+  }
+  return await r.json();
+}
+
+async function ensureFutureSteps(){
+  if(!state.seasonId || state.extending) return;
+  const remaining = state.maxStep - state.currentStep;
+  if(remaining > 1) return;
+  try{
+    state.extending = true;
+    const data = await extendSeason(12);
+    if(!data) return;
+    const grouped = {};
+    (data.prices || []).forEach(rec=>{
+      (grouped[rec.crop_id] ||= []).push(rec);
     });
-    
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Request failed');
+    Object.entries(grouped).forEach(([cid, rows])=>{
+      rows.sort((a,b)=>a.ts - b.ts);
+      const target = state.fullHistory[cid] || [];
+      rows.forEach(row=>{
+        target.push(row.price);
+      });
+      state.fullHistory[cid] = target;
+      if(!state.prices[cid]){
+        state.prices[cid] = target.length ? [target[0]] : [];
+      }
+      if(!state.crops.includes(cid)){
+        state.crops.push(cid);
+        state.crops.sort();
+      }
+    });
+    if(data.prices && data.prices.length){
+      const newMax = Math.max(...data.prices.map(p=>p.ts));
+      state.maxStep = Math.max(state.maxStep, newMax);
+      state.timelineComplete = false;
     }
-    
-    return response.json();
-}
-
-function formatCurrency(amount) {
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'USD',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    }).format(amount);
-}
-
-function formatPercent(value) {
-    const sign = value >= 0 ? '+' : '';
-    return `${sign}${value.toFixed(2)}%`;
-}
-
-function getPlantEmoji(plantId) {
-    const config = plantConfigs.find(c => c.id === plantId);
-    return config ? config.emoji : '🌱';
-}
-
-function getPlantName(plantId) {
-    const config = plantConfigs.find(c => c.id === plantId);
-    return config ? config.name : plantId;
-}
-
-function getPlantState(changePercent) {
-    if (changePercent > 10) return 'thriving';
-    if (changePercent < -10) return 'wilting';
-    return 'stable';
-}
-
-async function loadPlantConfigs() {
-    try {
-        plantConfigs = await fetchAPI('/api/plant-configs');
-    } catch (error) {
-        console.error('Failed to load plant configs:', error);
+    if(data.events && data.events.length){
+      state.events = [...state.events, ...data.events].sort((a,b)=>a.ts - b.ts);
     }
+    renderClock();
+  }catch(err){
+    console.error(err);
+    toast('Unable to extend market timeline. Start a new season.');
+    state.timelineComplete = true;
+  }finally{
+    state.extending = false;
+  }
 }
 
-async function updateMarket() {
-    try {
-        const prices = await fetchAPI('/api/market');
-        
-        const container = document.getElementById('plant-cards');
-        container.innerHTML = '';
-        
-        prices.forEach(plant => {
-            const emoji = getPlantEmoji(plant.plant_id);
-            const name = getPlantName(plant.plant_id);
-            const state = getPlantState(plant.change_percent);
-            const priceClass = plant.change_percent >= 0 ? 'price-up' : 'price-down';
-            
-            const card = document.createElement('div');
-            card.className = 'plant-card bg-white rounded-lg shadow-sm border border-gray-200 p-6 cursor-pointer fade-in';
-            card.onclick = () => openTradeModal(plant.plant_id);
-            
-            card.innerHTML = `
-                <div class="text-center mb-4">
-                    <div class="plant-emoji ${state === 'thriving' ? 'plant-thriving' : ''} ${state === 'wilting' ? 'plant-wilting' : ''}">${emoji}</div>
-                </div>
-                <h4 class="text-lg font-semibold text-gray-900 mb-2">${name}</h4>
-                <div class="space-y-1">
-                    <p class="text-2xl font-mono font-semibold text-gray-900">${formatCurrency(plant.price)}</p>
-                    <p class="text-sm font-medium ${priceClass}">${formatPercent(plant.change_percent)}</p>
-                </div>
-                <div class="mt-4 flex space-x-2">
-                    <button class="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700 transition-colors" onclick="event.stopPropagation(); openTradeModal('${plant.plant_id}')">
-                        Buy
-                    </button>
-                    <button class="flex-1 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors" onclick="event.stopPropagation(); openTradeModal('${plant.plant_id}')">
-                        Details
-                    </button>
-                </div>
-            `;
-            
-            container.appendChild(card);
-        });
-    } catch (error) {
-        console.error('Failed to update market:', error);
+async function advanceTick(manual = false){
+  if(!state.seasonId) return false;
+  if(state.currentStep >= state.maxStep){
+    await ensureFutureSteps();
+  }
+  if(state.currentStep >= state.maxStep){
+    if(!state.timelineComplete){
+      toast('Season timeline exhausted. Start a new season to keep growing.');
+      state.timelineComplete = true;
     }
-}
-
-async function updatePortfolio() {
-    try {
-        portfolioData = await fetchAPI('/api/portfolio');
-        
-        document.getElementById('header-cash').textContent = formatCurrency(portfolioData.cash);
-        document.getElementById('header-portfolio-value').textContent = formatCurrency(portfolioData.total_value);
-        document.getElementById('stat-total-value').textContent = formatCurrency(portfolioData.total_value);
-        document.getElementById('stat-cash').textContent = formatCurrency(portfolioData.cash);
-        
-        const totalHoldings = portfolioData.holdings.reduce((sum, h) => sum + h.quantity, 0);
-        document.getElementById('stat-plants-owned').textContent = totalHoldings;
-        
-        const totalGrowth = portfolioData.total_value - 10000;
-        const growthElement = document.getElementById('stat-today-growth');
-        growthElement.textContent = formatCurrency(totalGrowth);
-        growthElement.className = `text-2xl font-mono font-semibold ${totalGrowth >= 0 ? 'price-up' : 'price-down'}`;
-        
-        const container = document.getElementById('portfolio-holdings');
-        
-        if (portfolioData.holdings.length === 0) {
-            container.innerHTML = `
-                <div class="p-8 text-center text-gray-500">
-                    <p class="text-lg mb-2">Your garden is empty!</p>
-                    <p>Start investing in plants to grow your wealth.</p>
-                </div>
-            `;
-        } else {
-            const prices = await fetchAPI('/api/market');
-            const priceMap = Object.fromEntries(prices.map(p => [p.plant_id, p.price]));
-            
-            let html = '<table class="w-full"><thead class="bg-gray-50"><tr>';
-            html += '<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Plant</th>';
-            html += '<th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Quantity</th>';
-            html += '<th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Avg Price</th>';
-            html += '<th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Current</th>';
-            html += '<th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Value</th>';
-            html += '<th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">P/L</th>';
-            html += '<th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Action</th>';
-            html += '</tr></thead><tbody class="divide-y divide-gray-200">';
-            
-            portfolioData.holdings.forEach(holding => {
-                const currentPrice = priceMap[holding.plant_id] || 0;
-                const currentValue = holding.quantity * currentPrice;
-                const profitLoss = currentValue - holding.total_invested;
-                const profitLossPercent = (profitLoss / holding.total_invested) * 100;
-                const plClass = profitLoss >= 0 ? 'price-up' : 'price-down';
-                
-                html += '<tr class="hover:bg-gray-50">';
-                html += `<td class="px-6 py-4"><div class="flex items-center space-x-3"><span class="text-2xl">${getPlantEmoji(holding.plant_id)}</span><span class="font-medium">${getPlantName(holding.plant_id)}</span></div></td>`;
-                html += `<td class="px-6 py-4 text-right font-mono">${holding.quantity}</td>`;
-                html += `<td class="px-6 py-4 text-right font-mono">${formatCurrency(holding.avg_buy_price)}</td>`;
-                html += `<td class="px-6 py-4 text-right font-mono">${formatCurrency(currentPrice)}</td>`;
-                html += `<td class="px-6 py-4 text-right font-mono font-semibold">${formatCurrency(currentValue)}</td>`;
-                html += `<td class="px-6 py-4 text-right font-mono font-semibold ${plClass}">${formatCurrency(profitLoss)} (${formatPercent(profitLossPercent)})</td>`;
-                html += `<td class="px-6 py-4 text-right"><button onclick="openTradeModal('${holding.plant_id}')" class="text-sm bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors">Sell</button></td>`;
-                html += '</tr>';
-            });
-            
-            html += '</tbody></table>';
-            container.innerHTML = html;
-        }
-    } catch (error) {
-        console.error('Failed to update portfolio:', error);
+    if(!manual){
+      pauseClock();
     }
-}
-
-async function updateTransactions() {
-    try {
-        const transactions = await fetchAPI('/api/transactions');
-        
-        const container = document.getElementById('transactions-list');
-        
-        if (transactions.length === 0) {
-            container.innerHTML = `
-                <div class="p-8 text-center text-gray-500">
-                    <p>No transactions yet.</p>
-                </div>
-            `;
-        } else {
-            let html = '<div class="divide-y divide-gray-200">';
-            
-            transactions.forEach(tx => {
-                const date = new Date(tx.timestamp);
-                const actionClass = tx.action === 'buy' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
-                const actionText = tx.action === 'buy' ? 'Bought' : 'Sold';
-                
-                html += `
-                    <div class="px-6 py-4 hover:bg-gray-50">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center space-x-4">
-                                <span class="text-2xl">${getPlantEmoji(tx.plant_id)}</span>
-                                <div>
-                                    <div class="flex items-center space-x-2">
-                                        <span class="font-semibold">${tx.plant_name}</span>
-                                        <span class="px-2 py-1 rounded-full text-xs font-medium ${actionClass}">${actionText}</span>
-                                    </div>
-                                    <p class="text-sm text-gray-500">${date.toLocaleString()}</p>
-                                </div>
-                            </div>
-                            <div class="text-right">
-                                <p class="font-mono font-semibold">${formatCurrency(tx.total)}</p>
-                                <p class="text-sm text-gray-500">${tx.quantity} × ${formatCurrency(tx.price)}</p>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-            
-            html += '</div>';
-            container.innerHTML = html;
-        }
-    } catch (error) {
-        console.error('Failed to update transactions:', error);
+    return false;
+  }
+  state.currentStep += 1;
+  state.crops.forEach(cid=>{
+    const hist = state.fullHistory[cid] || [];
+    const next = hist[state.currentStep];
+    if(next === undefined) return;
+    const visible = state.prices[cid] || [];
+    visible.push(next);
+    if(visible.length > 180){
+      visible.shift();
     }
-}
-
-async function openTradeModal(plantId) {
-    currentPlantId = plantId;
-    
-    const prices = await fetchAPI('/api/market');
-    const plant = prices.find(p => p.plant_id === plantId);
-    
-    if (!plant) return;
-    
-    document.getElementById('modal-plant-name').textContent = getPlantName(plantId);
-    document.getElementById('modal-plant-id').textContent = plantId;
-    document.getElementById('modal-current-price').textContent = formatCurrency(plant.price);
-    
-    const changeClass = plant.change_percent >= 0 ? 'price-up' : 'price-down';
-    const changeElement = document.getElementById('modal-price-change');
-    changeElement.textContent = formatPercent(plant.change_percent);
-    changeElement.className = `text-sm font-medium ${changeClass}`;
-    
-    document.getElementById('modal-available-cash').textContent = formatCurrency(portfolioData.cash);
-    document.getElementById('trade-quantity').value = 1;
-    
-    const holding = portfolioData.holdings.find(h => h.plant_id === plantId);
-    if (holding) {
-        document.getElementById('holdings-info').classList.remove('hidden');
-        document.getElementById('modal-holdings').textContent = `${holding.quantity} plants`;
-        document.getElementById('sell-button').disabled = false;
-    } else {
-        document.getElementById('holdings-info').classList.add('hidden');
-        document.getElementById('sell-button').disabled = true;
-    }
-    
+    state.prices[cid] = visible;
+  });
+  renderMarket();
+  renderPortfolio();
+  renderEvents();
+  renderClock();
+  const modal = document.getElementById('trade-modal');
+  if(modal && !modal.classList.contains('hidden') && currentCrop){
+    await buildModalChart(currentCrop);
     updateTradeTotal();
-    
-    await loadPriceChart(plantId);
-    
-    document.getElementById('trade-modal').classList.remove('hidden');
+  }
+  const eventsThisStep = (state.events || []).filter(e => e.ts === state.currentStep);
+  if(eventsThisStep.length){
+    const names = eventsThisStep.map(e=>e.name || titleize(e.type));
+    toast(`New event: ${names.join(', ')}`);
+  }
+  return true;
 }
 
-function closeTradeModal() {
-    document.getElementById('trade-modal').classList.add('hidden');
-    currentPlantId = null;
-    
-    if (modalChart) {
-        modalChart.destroy();
-        modalChart = null;
+// ---------- Rendering ----------
+function renderMacro(){
+  const m = state.macro || {};
+  const el = document.getElementById('macro-card');
+  el.innerHTML = `
+    <p><span class="font-semibold">Inflation (YoY):</span> ${(100*(m.inflation_ann||0)).toFixed(1)}%</p>
+    <p><span class="font-semibold">Fed Funds (annual):</span> ${(100*(m.rf_rate_ann||0)).toFixed(2)}%</p>
+    <p><span class="font-semibold">Term Spread:</span> ${(m.term_spread||0).toFixed(2)}%</p>
+    <p><span class="font-semibold">Recession:</span> ${m.recession ? 'Yes' : 'No'}</p>
+    <p class="text-xs text-gray-500">As of ${m.asof||'—'}. Volatility multiplier applied: ${(m.vol_mult||1).toFixed(2)}×</p>
+  `;
+}
+
+function renderEvents(){
+  const el = document.getElementById('event-timeline');
+  const visible = (state.events || []).filter(e => typeof e.ts === 'number' ? e.ts <= state.currentStep : true);
+  if(!visible.length){
+    el.innerHTML = '<p>No events yet.</p>';
+    return;
+  }
+  el.innerHTML = visible.slice(-20).map(e => {
+    const emoji = e.type.includes('bull') ? '☀️' : e.type.includes('bear') ? '⛈️' : e.type.includes('bug') ? '🐛' : '⚡';
+    return `<div class="flex items-center space-x-2"><span>${emoji}</span><span class="font-mono text-xs">t=${e.ts}</span><span>${e.name||e.type}</span></div>`;
+  }).join('');
+}
+
+function renderMarket(){
+  const grid = document.getElementById('plant-cards');
+  grid.innerHTML = '';
+  if(!state.crops.length){
+    grid.innerHTML = `<div class="col-span-full bg-white border border-dashed border-gray-300 rounded-lg p-6 text-center text-gray-500">
+      No plants yet. Start a season to populate the market garden.
+    </div>`;
+    return;
+  }
+  for(const cid of state.crops){
+    const arr = state.prices[cid] || [];
+    const last = arr[arr.length-1] || 100;
+    const prev = arr[arr.length-2] || last;
+    const change = (last - prev) / (prev || 1);
+    const color = change > 0 ? 'price-up' : (change < 0 ? 'price-down' : 'price-neutral');
+    const meta = cropMeta(cid);
+    const qty = state.holdings[cid] || 0;
+    const basis = state.costBasis[cid] || 0;
+    let basisHtml = '';
+    if(qty > 0 && basis){
+      const delta = basis > 0 ? (last - basis) / basis : 0;
+      const basisClass = delta >= 0 ? 'text-green-600' : 'text-red-600';
+      basisHtml = `<p class="text-xs ${basisClass}">Basis ${fmt(basis)} (${(delta*100).toFixed(1)}%)</p>`;
     }
+    const card = document.createElement('div');
+    card.className = 'plant-card bg-white rounded-lg p-6 shadow-sm border border-gray-200 fade-in';
+    card.innerHTML = `
+      <div class="flex items-start justify-between">
+        <div>
+          <div class="plant-emoji mb-2 ${change>0?'plant-thriving':'plant-wilting'}">${meta.emoji}</div>
+          <h4 class="text-lg font-semibold">${meta.name}</h4>
+          <p class="text-sm text-gray-500">${meta.tagline}</p>
+          ${basisHtml}
+        </div>
+        <div class="text-right">
+          <div class="text-2xl font-mono font-semibold">${fmt(last)}</div>
+          <div class="${color} text-sm">${pct(change)}</div>
+        </div>
+      </div>
+      <div class="mt-4">
+        <button class="w-full bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700" data-crop="${cid}">Trade</button>
+      </div>
+    `;
+    card.querySelector('button').addEventListener('click', ()=> openTradeModal(cid));
+    grid.appendChild(card);
+  }
 }
 
-async function loadPriceChart(plantId) {
-    try {
-        const history = await fetchAPI(`/api/price-history/${plantId}`);
-        
-        const ctx = document.getElementById('modal-chart').getContext('2d');
-        
-        if (modalChart) {
-            modalChart.destroy();
-        }
-        
-        const labels = history.map(h => new Date(h.timestamp).toLocaleTimeString());
-        const data = history.map(h => h.price);
-        
-        modalChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Price',
-                    data: data,
-                    borderColor: 'rgb(34, 197, 94)',
-                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                    fill: true,
-                    tension: 0.4,
-                    pointRadius: 0,
-                    borderWidth: 2,
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    tooltip: {
-                        mode: 'index',
-                        intersect: false,
-                        callbacks: {
-                            label: (context) => formatCurrency(context.parsed.y)
-                        }
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: false,
-                        ticks: {
-                            callback: (value) => formatCurrency(value)
-                        }
-                    },
-                    x: {
-                        ticks: {
-                            maxTicksLimit: 8
-                        }
-                    }
-                }
-            }
-        });
-    } catch (error) {
-        console.error('Failed to load price chart:', error);
+function renderPortfolio(){
+  // Compute total value
+  const last = latestPrices();
+  let plants = 0;
+  let value = state.cash;
+  let growth = 0;
+  for(const cid of state.crops){
+    const qty = state.holdings[cid] || 0;
+    plants += qty;
+    value += qty * (last[cid]||0);
+    const series = state.prices[cid] || [];
+    if(series.length > 1){
+      const delta = series[series.length-1] - series[series.length-2];
+      growth += qty * delta;
     }
+  }
+  document.getElementById('header-cash').textContent = fmt(state.cash);
+  document.getElementById('header-portfolio-value').textContent = fmt(value);
+  document.getElementById('stat-total-value').textContent = fmt(value);
+  document.getElementById('stat-cash').textContent = fmt(state.cash);
+  document.getElementById('stat-plants-owned').textContent = plants.toString();
+  const growthEl = document.getElementById('stat-today-growth');
+  if(growthEl){
+    growthEl.textContent = fmtSigned(growth);
+    growthEl.className = `text-2xl font-mono font-semibold ${growth >= 0 ? 'text-green-600' : 'text-red-600'}`;
+  }
+
+  // Render holdings table
+  const container = document.getElementById('portfolio-holdings');
+  if(plants === 0){
+    container.innerHTML = `<div class="p-8 text-center text-gray-500"><p class="text-lg mb-2">Your garden is empty!</p><p>Start investing in plants to grow your wealth.</p></div>`;
+    return;
+  }
+  const rows = state.crops.filter(cid => (state.holdings[cid]||0) > 0).map(cid=>{
+    const qty = state.holdings[cid]||0;
+    const p = last[cid]||0;
+    const val = qty*p;
+    const meta = cropMeta(cid);
+    const basis = state.costBasis[cid] || 0;
+    const plValue = qty ? qty * (p - basis) : 0;
+    const plPct = basis > 0 ? ((p - basis) / basis) * 100 : 0;
+    const plClass = plValue >= 0 ? 'text-green-600' : 'text-red-600';
+    return `<tr>
+      <td class="px-4 py-2">${meta.name}</td>
+      <td class="px-4 py-2 text-right font-mono">${qty}</td>
+      <td class="px-4 py-2 text-right font-mono">${fmt(p)}</td>
+      <td class="px-4 py-2 text-right font-mono">${fmt(basis)}</td>
+      <td class="px-4 py-2 text-right font-mono">${fmt(val)}</td>
+      <td class="px-4 py-2 text-right font-mono ${plClass}">${fmtSigned(plValue)} (${plPct.toFixed(1)}%)</td>
+    </tr>`;
+  }).join('');
+  container.innerHTML = `
+    <table class="min-w-full text-sm">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-2 text-left">Crop</th>
+          <th class="px-4 py-2 text-right">Qty</th>
+          <th class="px-4 py-2 text-right">Price</th>
+          <th class="px-4 py-2 text-right">Avg Cost</th>
+          <th class="px-4 py-2 text-right">Value</th>
+          <th class="px-4 py-2 text-right">P/L</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
-function updateTradeTotal() {
-    const quantity = parseInt(document.getElementById('trade-quantity').value) || 0;
-    const prices = document.getElementById('modal-current-price').textContent;
-    const price = parseFloat(prices.replace(/[$,]/g, ''));
-    const total = quantity * price;
-    
-    document.getElementById('trade-total').textContent = formatCurrency(total);
-}
+function updateHeader(){ renderPortfolio(); }
 
-async function executeBuy() {
-    const quantity = parseInt(document.getElementById('trade-quantity').value);
-    
-    if (!quantity || quantity <= 0) {
-        showToast('Please enter a valid quantity', 'error');
-        return;
+// ---------- Trade Modal ----------
+let modalChart = null;
+let currentCrop = null;
+
+function openTradeModal(cid){
+  currentCrop = cid;
+  const modal = document.getElementById('trade-modal');
+  modal.classList.remove('hidden');
+  const meta = cropMeta(cid);
+  document.getElementById('modal-plant-name').textContent = meta.name;
+  document.getElementById('modal-plant-id').textContent = cid;
+  const arr = state.prices[cid]||[100,100.5,101];
+  const last = arr[arr.length-1], prev = arr[arr.length-2]||last;
+  const change = (last-prev)/(prev||1);
+  document.getElementById('modal-current-price').textContent = fmt(last);
+  const pc = document.getElementById('modal-price-change');
+  pc.textContent = pct(change);
+  pc.className = `text-sm font-medium ${change>0?'price-up':(change<0?'price-down':'price-neutral')}`;
+  document.getElementById('modal-available-cash').textContent = fmt(state.cash);
+  const owned = state.holdings[cid]||0;
+  const basis = state.costBasis[cid] || 0;
+  const hi = document.getElementById('holdings-info');
+  if(owned>0){
+    hi.classList.remove('hidden');
+    document.getElementById('modal-holdings').textContent = `${owned} plants`;
+    const basisEl = document.getElementById('modal-holdings-basis');
+    if(basisEl){
+      basisEl.textContent = `${fmt(basis)} avg cost`;
     }
-    
-    try {
-        await postAPI('/api/buy', {
-            plant_id: currentPlantId,
-            quantity: quantity
-        });
-        
-        showToast(`Successfully bought ${quantity} ${getPlantName(currentPlantId)}!`, 'success');
-        closeTradeModal();
-        
-        await updatePortfolio();
-        await updateTransactions();
-    } catch (error) {
-        showToast(error.message, 'error');
-    }
+  } else {
+    hi.classList.add('hidden');
+  }
+  document.getElementById('trade-quantity').value = 1;
+  updateTradeTotal();
+
+  // Build chart with history + forecast
+  buildModalChart(cid);
 }
 
-async function executeSell() {
-    const quantity = parseInt(document.getElementById('trade-quantity').value);
-    
-    if (!quantity || quantity <= 0) {
-        showToast('Please enter a valid quantity', 'error');
-        return;
-    }
-    
-    try {
-        await postAPI('/api/sell', {
-            plant_id: currentPlantId,
-            quantity: quantity
-        });
-        
-        showToast(`Successfully sold ${quantity} ${getPlantName(currentPlantId)}!`, 'success');
-        closeTradeModal();
-        
-        await updatePortfolio();
-        await updateTransactions();
-    } catch (error) {
-        showToast(error.message, 'error');
-    }
+function closeTradeModal(){
+  const modal = document.getElementById('trade-modal');
+  modal.classList.add('hidden');
+  if(modalChart){ modalChart.destroy(); modalChart = null; }
 }
 
-function showToast(message, type = 'info') {
-    const toast = document.getElementById('toast');
-    const messageEl = document.getElementById('toast-message');
-    
-    messageEl.textContent = message;
-    toast.className = `fixed bottom-4 right-4 rounded-lg shadow-lg border p-4 max-w-sm z-50 ${
-        type === 'success' ? 'bg-green-50 border-green-200 text-green-800' :
-        type === 'error' ? 'bg-red-50 border-red-200 text-red-800' :
-        'bg-white border-gray-200'
-    }`;
-    
-    toast.classList.remove('hidden');
-    
-    setTimeout(() => {
-        toast.classList.add('hidden');
-    }, 3000);
+function updateTradeTotal(){
+  const qty = parseInt(document.getElementById('trade-quantity').value || '0',10);
+  const price = (state.prices[currentCrop]||[]).slice(-1)[0] || 0;
+  document.getElementById('trade-total').textContent = fmt(qty*price);
 }
 
-async function init() {
-    await loadPlantConfigs();
-    await updateMarket();
-    await updatePortfolio();
-    await updateTransactions();
-    
-    setInterval(async () => {
-        await updateMarket();
-        await updatePortfolio();
-    }, UPDATE_INTERVAL);
-}
-
-document.addEventListener('DOMContentLoaded', init);
-
-document.getElementById('trade-modal').addEventListener('click', (e) => {
-    if (e.target.id === 'trade-modal') {
-        closeTradeModal();
+async function buildModalChart(cid){
+  const ctx = document.getElementById('modal-chart').getContext('2d');
+  const hist = (state.fullHistory[cid]||[]).slice(0, state.currentStep + 1).slice(-50);
+  // fetch forecast
+  let fc = {mean:[], p10:[], p90:[]};
+  try{
+    const fr = await fetch(`${API()}/forecast`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({season_id: state.seasonId, crop_ids: [cid], horizon: 12})
+    });
+    if(fr.ok){
+      const fj = await fr.json();
+      fc = (fj.forecasts && fj.forecasts[cid]) || fc;
     }
+  }catch(err){
+    console.warn('forecast fetch failed', err);
+  }
+
+  const labels = [...hist.map((_,i)=>`t-${hist.length-i}`), ...fc.mean.map((_,i)=>`+${i+1}`)];
+  const histData = hist;
+  const forecastData = fc.mean ? fc.mean : [];
+  const bandLow = fc.p10 || [];
+  const bandHigh = fc.p90 || [];
+
+  if(modalChart){ modalChart.destroy(); }
+  modalChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {label: 'History', data: histData, borderWidth: 2, tension: 0.2},
+        {label: 'Forecast (mean)', data: [...Array(hist.length).fill(null), ...forecastData], borderWidth: 2, borderDash: [6,4], tension: 0.2},
+        {label: 'p10', data: [...Array(hist.length).fill(null), ...bandLow], borderWidth: 1, borderDash: [2,2], tension: 0.2},
+        {label: 'p90', data: [...Array(hist.length).fill(null), ...bandHigh], borderWidth: 1, borderDash: [2,2], tension: 0.2},
+      ]
+    },
+    options: {
+      plugins: { legend: { display: true } },
+      scales: { y: { beginAtZero: false } }
+    }
+  });
+}
+
+function executeBuy(){
+  const qty = parseInt(document.getElementById('trade-quantity').value || '0',10);
+  if(!qty || qty < 1) return;
+  const price = (state.prices[currentCrop]||[]).slice(-1)[0] || 0;
+  const cost = qty * price;
+  if(cost > state.cash){ toast('Not enough cash'); return; }
+  state.cash -= cost;
+  const prevQty = state.holdings[currentCrop] || 0;
+  const prevBasis = state.costBasis[currentCrop] || 0;
+  const newQty = prevQty + qty;
+  const totalCost = prevQty * prevBasis + cost;
+  state.holdings[currentCrop] = newQty;
+  state.costBasis[currentCrop] = newQty ? totalCost / newQty : 0;
+  state.txns.unshift({t: Date.now(), type:'BUY', cid: currentCrop, qty, price});
+  renderPortfolio();
+  renderTxns();
+  updateTradeTotal();
+  toast(`Bought ${qty} ${currentCrop}`);
+}
+
+function executeSell(){
+  const qty = parseInt(document.getElementById('trade-quantity').value || '0',10);
+  if(!qty || qty < 1) return;
+  const owned = state.holdings[currentCrop]||0;
+  if(qty > owned){ toast('Not enough holdings'); return; }
+  const price = (state.prices[currentCrop]||[]).slice(-1)[0] || 0;
+  const proceeds = qty * price;
+  state.cash += proceeds;
+  state.holdings[currentCrop] = owned - qty;
+  if(state.holdings[currentCrop] <= 0){
+    state.holdings[currentCrop] = 0;
+    state.costBasis[currentCrop] = 0;
+  }
+  state.txns.unshift({t: Date.now(), type:'SELL', cid: currentCrop, qty, price});
+  renderPortfolio();
+  renderTxns();
+  updateTradeTotal();
+  toast(`Sold ${qty} ${currentCrop}`);
+}
+
+function renderTxns(){
+  const list = document.getElementById('transactions-list');
+  if(!state.txns.length){
+    list.innerHTML = `<div class="p-8 text-center text-gray-500"><p>No transactions yet.</p></div>`;
+    return;
+  }
+  list.innerHTML = state.txns.slice(0,10).map(x=>{
+    const color = x.type === 'BUY' ? 'text-green-700' : 'text-red-700';
+    const meta = cropMeta(x.cid);
+    return `<div class="flex justify-between items-center px-4 py-2 border-b border-gray-100">
+      <div class="${color} font-semibold">${x.type}</div>
+      <div class="font-mono">${meta.name}</div>
+      <div class="font-mono">qty ${x.qty}</div>
+      <div class="font-mono">${fmt(x.price)}</div>
+    </div>`;
+  }).join('');
+}
+
+// ---------- Wire buttons ----------
+document.getElementById('btn-new-season').addEventListener('click', newSeason);
+document.getElementById('btn-report').addEventListener('click', async ()=>{
+  if(!state.seasonId){ toast('Start a season first'); return; }
+  const r = await fetch(`${API()}/report`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({season_id: state.seasonId})});
+  const j = await r.json();
+  if(j && j.metrics){
+    const m = j.metrics;
+    toast(`Report → Sharpe ${(m.sharpe||0).toFixed(2)}, MDD ${(100*(m.mdd||0)).toFixed(1)}%, Wealth x${(m.wealth||1).toFixed(2)}`);
+  } else {
+    toast('Report failed');
+  }
 });
+document.getElementById('btn-mc').addEventListener('click', runMonteCarlo);
+document.getElementById('btn-toggle-clock').addEventListener('click', toggleClock);
+document.getElementById('btn-step').addEventListener('click', async ()=>{
+  if(state.timelineComplete){
+    await newSeason();
+    return;
+  }
+  pauseClock();
+  await advanceTick(true);
+});
+
+// ---------- Boot ----------
+(async function boot(){
+  try{
+    const macro = await getMacro();
+    state.macro = macro || {};
+    renderMacro();
+  }catch(e){
+    // ignore
+  }
+  // Auto-start one season on load for demo
+  await newSeason();
+})();
