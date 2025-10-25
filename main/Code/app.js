@@ -130,6 +130,29 @@ function cropMeta(cid){
   };
 }
 
+function computeDiversificationHHI(){
+  const prices = latestPrices();
+  const weights = {};
+  let total = 0;
+  for(const cid of state.crops){
+    const netQty = (state.holdings[cid] || 0) - (state.shorts[cid] || 0);
+    const exposure = Math.abs(netQty * (prices[cid] || 0));
+    if(exposure > 0){
+      weights[cid] = exposure;
+      total += exposure;
+    }
+  }
+  if(total <= 0){
+    return 0.0;
+  }
+  let hhi = 0;
+  for(const cid of Object.keys(weights)){
+    const share = weights[cid] / total;
+    hhi += share * share;
+  }
+  return Math.min(1, Math.max(0, hhi));
+}
+
 function resetTimeline(){
   if(state.timerId){
     clearTimeout(state.timerId);
@@ -364,10 +387,11 @@ async function runMonteCarlo(){
 
 async function extendSeason(steps = 12){
   if(!state.seasonId) return null;
+  const diversification = computeDiversificationHHI();
   const r = await fetch(`${API()}/season/${encodeURIComponent(state.seasonId)}/advance`, {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({steps})
+    body: JSON.stringify({steps, diversification_hhi: diversification})
   });
   if(!r.ok){
     throw new Error(`extend failed: ${r.status}`);

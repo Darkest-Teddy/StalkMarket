@@ -243,6 +243,7 @@ class MonteCarloResponse(BaseModel):
 class AdvanceRequest(BaseModel):
     steps: int = Field(12, ge=1, le=260)
     seed: Optional[int] = None
+    diversification_hhi: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 class Choice(BaseModel):
     outcomes_A: List[float]
@@ -338,6 +339,11 @@ def advance_season(season_id: str, req: AdvanceRequest):
     seed = req.seed if req.seed is not None else random.randint(0, 1_000_000_000)
     np.random.seed(seed)
 
+    div_hhi = float(req.diversification_hhi) if req.diversification_hhi is not None else 0.0
+    penalty = max(0.0, min(1.0, div_hhi - 0.35))
+    mu_penalty = 0.08 * penalty
+    vol_multiplier = 1.0 + 0.25 * penalty
+
     for step in range(req.steps):
         t = current_ts + 1 + step
         seas = {cp.crop_id: seasonal_multiplier(t, period, cp.seasonality_strength) for cp in crop_params}
@@ -350,8 +356,9 @@ def advance_season(season_id: str, req: AdvanceRequest):
             cid = cp.crop_id
             prev_price = latest_prices.get(cid, 100.0)
             mu_nom = cp.mu + macro.get("inflation_ann", 0.0)
-            sig_adj = cp.sigma * macro.get("vol_mult", 1.0)
-            base_next = step_price(prev_price, mu_nom, sig_adj, dt, seas[cid],
+            sig_adj = cp.sigma * macro.get("vol_mult", 1.0) * vol_multiplier
+            mu_effective = mu_nom - mu_penalty
+            base_next = step_price(prev_price, mu_effective, sig_adj, dt, seas[cid],
                                    lam=cp.jump_lam * (1.3 if macro.get("recession", False) else 1.0),
                                    mu_j=cp.jump_mu, sig_j=cp.jump_sig)
             shock = engine.log_return_shock(cid)
