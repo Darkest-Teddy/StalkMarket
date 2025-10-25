@@ -160,7 +160,15 @@ class EventEngine:
                 else:
                     affected = [r.target]
                 self.active.append(ActiveEvent(r.id, r.duration_steps, affected))
-                events_out.append({"type": r.id, "name": r.name, "affected": affected, "note": "event triggered"})
+                events_out.append({
+                    "type": r.id,
+                    "name": r.name,
+                    "affected": affected,
+                    "note": "event triggered",
+                    "duration": r.duration_steps,
+                    "level": r.level,
+                    "target": r.target,
+                })
         # decay
         for ev in list(self.active):
             ev.remaining -= 1
@@ -538,3 +546,7 @@ def demo_seed(season_id: str = "S1"):
     res = simulate(SimulateRequest(season_id=season_id, seed=123, steps=52, crop_params=cps,
                                    start_prices={c["id"]: 100.0 for c in DEFAULT_CROPS}))
     return {"ok": True, "season_id": season_id, "n_prices": len(res.prices), "macro": res.macro}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:api", host="0.0.0.0", port=8000, reload=True)

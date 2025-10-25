@@ -37,7 +37,7 @@
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
     <!-- Macro Card + Season Controls -->
     <section class="mb-8">
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
           <h3 class="text-xl font-display font-semibold mb-2">🌤️ Macro Weather (FRED)</h3>
           <div id="macro-card" class="text-sm text-gray-700 space-y-1">
@@ -56,12 +56,6 @@
               <button id="btn-step" class="bg-gray-200 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-300">Advance 1 Day</button>
             </div>
             <p class="text-xs text-gray-500">Season ID: <span id="season-id" class="font-mono">—</span></p>
-          </div>
-        </div>
-        <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-          <h3 class="text-xl font-display font-semibold mb-2">🌪️ Event Timeline</h3>
-          <div id="event-timeline" class="text-sm text-gray-700 space-y-1 max-h-40 overflow-y-auto">
-            <p>No events yet.</p>
           </div>
         </div>
       </div>
@@ -114,6 +108,14 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- Shorted Seeds Section -->
+    <section class="mb-12">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-2xl font-display font-semibold text-gray-900">Shorted Seeds 🌪️</h3>
+      </div>
+      <div id="short-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"></div>
     </section>
 
     <!-- Transactions Section -->
@@ -186,14 +188,30 @@
                 <span class="font-mono" id="modal-holdings-basis">$0.00</span>
               </div>
             </div>
+            <div id="short-info" class="hidden mt-2 pt-2 border-t border-gray-200">
+              <div class="flex justify-between items-center text-sm">
+                <span class="text-gray-600">Borrowed:</span>
+                <span class="font-mono" id="modal-short-qty">0 plants</span>
+              </div>
+              <div class="flex justify-between items-center text-sm">
+                <span class="text-gray-600">Borrow Basis:</span>
+                <span class="font-mono" id="modal-short-basis">$0.00</span>
+              </div>
+            </div>
           </div>
 
-          <div class="flex space-x-4">
-            <button onclick="executeBuy()" class="flex-1 bg-green-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button onclick="executeBuy()" class="w-full bg-green-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors">
               Buy Plants
             </button>
-            <button onclick="executeSell()" id="sell-button" class="flex-1 bg-red-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-700 transition-colors">
+            <button onclick="executeSell()" id="sell-button" class="w-full bg-red-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-700 transition-colors">
               Sell Plants
+            </button>
+            <button onclick="executeShort()" class="w-full bg-yellow-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-yellow-600 transition-colors">
+              Borrow & Short
+            </button>
+            <button onclick="executeCover()" class="w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors">
+              Cover Short
             </button>
           </div>
         </div>
@@ -205,6 +223,9 @@
   <div id="toast" class="hidden fixed bottom-4 right-4 bg-white rounded-lg shadow-lg border border-gray-200 p-4 max-w-sm z-50">
     <p id="toast-message" class="text-sm"></p>
   </div>
+
+  <!-- Event Popups -->
+  <div id="event-stack" class="fixed top-24 right-4 space-y-3 max-w-sm z-40 pointer-events-none"></div>
 
   <script>
     window.API_BASE = localStorage.getItem('FF_API_BASE') || 'http://localhost:8000';

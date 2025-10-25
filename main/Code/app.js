@@ -14,6 +14,7 @@ const state = {
   macro: {},
   cash: 10000,
   holdings: {},   // {cropId: qty}
+  shorts: {},     // {cropId: qty}
   txns: [],
   charts: {},
   fullHistory: {},   // complete price history per crop
@@ -23,8 +24,10 @@ const state = {
   timerId: null,
   timerRunning: false,
   costBasis: {},
+  shortBasis: {},
   extending: false,
   timelineComplete: false,
+  eventPopups: [],
 };
 
 const CROPS_META = {
@@ -85,14 +88,21 @@ function portfolioWeights() {
   let total = 0;
   const w = {};
   for (const cid of state.crops) {
-    const qty = state.holdings[cid] || 0;
+    const qtyLong = state.holdings[cid] || 0;
+    const qtyShort = state.shorts[cid] || 0;
     const p = latest[cid] || 0;
-    total += qty * p;
+    const exposure = qtyLong * p - qtyShort * p;
+    total += Math.abs(exposure);
+    w[cid] = exposure;
   }
-  for (const cid of state.crops) {
-    const qty = state.holdings[cid] || 0;
-    const p = latest[cid] || 0;
-    w[cid] = total > 0 ? (qty * p) / total : 0;
+  if(total > 0){
+    for (const cid of state.crops) {
+      w[cid] = w[cid] / total;
+    }
+  } else {
+    for (const cid of state.crops) {
+      w[cid] = 0;
+    }
   }
   return w;
 }
@@ -178,6 +188,55 @@ function renderClock(){
   }
 }
 
+function hydrateEventPopups(){
+  const now = state.currentStep;
+  state.eventPopups = [];
+  (state.events || []).forEach(ev=>{
+    const duration = ev.duration || 1;
+    const end = ev.ts + duration;
+    if(now >= ev.ts && now < end){
+      state.eventPopups.push({...ev, endStep: end});
+    }
+  });
+  renderEventPopups();
+}
+
+function triggerEventPopup(ev){
+  const duration = ev.duration || 1;
+  const end = ev.ts + duration;
+  state.eventPopups = state.eventPopups.filter(x => !(x.type === ev.type && x.ts === ev.ts));
+  state.eventPopups.push({...ev, endStep: end});
+  renderEventPopups();
+}
+
+function renderEventPopups(){
+  const container = document.getElementById('event-stack');
+  if(!container) return;
+  const now = state.currentStep;
+  state.eventPopups = state.eventPopups.filter(ev => ev.endStep > now);
+  container.innerHTML = '';
+  state.eventPopups
+    .slice()
+    .sort((a,b)=> (b.endStep - a.endStep))
+    .forEach(ev=>{
+      const el = document.createElement('div');
+      el.className = 'bg-white/95 border border-emerald-200 shadow-lg rounded-lg p-4 space-y-2 pointer-events-auto';
+      const name = ev.name || titleize(ev.type);
+      const remaining = Math.max(0, ev.endStep - now);
+      const affects = (ev.affected || []).length ? ev.affected.join(', ') : 'All crops';
+      el.innerHTML = `
+        <div class="flex items-center justify-between">
+          <span class="font-semibold text-green-800">${name}</span>
+          <span class="text-xs font-mono text-gray-500">Day ${ev.ts}</span>
+        </div>
+        <p class="text-xs text-gray-600">${ev.note || 'Seasonal conditions in effect.'}</p>
+        <p class="text-xs text-gray-500">Affects: ${affects}</p>
+        <p class="text-xs text-emerald-700 font-semibold">Expires in ${remaining} day${remaining === 1 ? '' : 's'}</p>
+      `;
+      container.appendChild(el);
+    });
+}
+
 function scheduleNextTick(){
   if(!state.timerRunning) return;
   if(state.timerId){
@@ -243,16 +302,20 @@ async function newSeason() {
     state.macro = macro;
     state.cash = 10000;
     state.holdings = {};
+    state.shorts = {};
     state.txns = [];
     state.costBasis = {};
+    state.shortBasis = {};
     initTimeline(prices);
 
     renderMacro();
     renderMarket();
+    renderShorts();
     renderPortfolio();
-    renderEvents();
     renderTxns();
     renderClock();
+    state.eventPopups = [];
+    hydrateEventPopups();
     startClock();
     toast('New season started!');
   }catch(err){
@@ -348,6 +411,7 @@ async function ensureFutureSteps(){
       state.events = [...state.events, ...data.events].sort((a,b)=>a.ts - b.ts);
     }
     renderClock();
+    hydrateEventPopups();
   }catch(err){
     console.error(err);
     toast('Unable to extend market timeline. Start a new season.');
@@ -386,8 +450,8 @@ async function advanceTick(manual = false){
   });
   renderMarket();
   renderPortfolio();
-  renderEvents();
   renderClock();
+  renderEventPopups();
   const modal = document.getElementById('trade-modal');
   if(modal && !modal.classList.contains('hidden') && currentCrop){
     await buildModalChart(currentCrop);
@@ -395,8 +459,7 @@ async function advanceTick(manual = false){
   }
   const eventsThisStep = (state.events || []).filter(e => e.ts === state.currentStep);
   if(eventsThisStep.length){
-    const names = eventsThisStep.map(e=>e.name || titleize(e.type));
-    toast(`New event: ${names.join(', ')}`);
+    eventsThisStep.forEach(triggerEventPopup);
   }
   return true;
 }
@@ -412,19 +475,6 @@ function renderMacro(){
     <p><span class="font-semibold">Recession:</span> ${m.recession ? 'Yes' : 'No'}</p>
     <p class="text-xs text-gray-500">As of ${m.asof||'—'}. Volatility multiplier applied: ${(m.vol_mult||1).toFixed(2)}×</p>
   `;
-}
-
-function renderEvents(){
-  const el = document.getElementById('event-timeline');
-  const visible = (state.events || []).filter(e => typeof e.ts === 'number' ? e.ts <= state.currentStep : true);
-  if(!visible.length){
-    el.innerHTML = '<p>No events yet.</p>';
-    return;
-  }
-  el.innerHTML = visible.slice(-20).map(e => {
-    const emoji = e.type.includes('bull') ? '☀️' : e.type.includes('bear') ? '⛈️' : e.type.includes('bug') ? '🐛' : '⚡';
-    return `<div class="flex items-center space-x-2"><span>${emoji}</span><span class="font-mono text-xs">t=${e.ts}</span><span>${e.name||e.type}</span></div>`;
-  }).join('');
 }
 
 function renderMarket(){
@@ -445,11 +495,18 @@ function renderMarket(){
     const meta = cropMeta(cid);
     const qty = state.holdings[cid] || 0;
     const basis = state.costBasis[cid] || 0;
-    let basisHtml = '';
-    if(qty > 0 && basis){
+    const shortQty = state.shorts[cid] || 0;
+    const shortBasis = state.shortBasis[cid] || 0;
+    let positionHtml = '';
+    if(qty > 0){
       const delta = basis > 0 ? (last - basis) / basis : 0;
       const basisClass = delta >= 0 ? 'text-green-600' : 'text-red-600';
-      basisHtml = `<p class="text-xs ${basisClass}">Basis ${fmt(basis)} (${(delta*100).toFixed(1)}%)</p>`;
+      positionHtml += `<p class="text-xs ${basisClass}">Long ${qty} @ ${fmt(basis)} (${(delta*100).toFixed(1)}%)</p>`;
+    }
+    if(shortQty > 0){
+      const deltaShort = shortBasis > 0 ? (shortBasis - last) / shortBasis : 0;
+      const basisClassShort = deltaShort >= 0 ? 'text-green-600' : 'text-red-600';
+      positionHtml += `<p class="text-xs ${basisClassShort}">Short ${shortQty} @ ${fmt(shortBasis)} (${(deltaShort*100).toFixed(1)}%)</p>`;
     }
     const card = document.createElement('div');
     card.className = 'plant-card bg-white rounded-lg p-6 shadow-sm border border-gray-200 fade-in';
@@ -459,7 +516,7 @@ function renderMarket(){
           <div class="plant-emoji mb-2 ${change>0?'plant-thriving':'plant-wilting'}">${meta.emoji}</div>
           <h4 class="text-lg font-semibold">${meta.name}</h4>
           <p class="text-sm text-gray-500">${meta.tagline}</p>
-          ${basisHtml}
+          ${positionHtml}
         </div>
         <div class="text-right">
           <div class="text-2xl font-mono font-semibold">${fmt(last)}</div>
@@ -475,6 +532,51 @@ function renderMarket(){
   }
 }
 
+function renderShorts(){
+  const grid = document.getElementById('short-cards');
+  if(!grid) return;
+  const active = state.crops.filter(cid => (state.shorts[cid] || 0) > 0);
+  if(!active.length){
+    grid.innerHTML = `<div class="col-span-full bg-white border border-dashed border-gray-300 rounded-lg p-6 text-center text-gray-500">
+      No borrowed seeds. Use Borrow & Short to profit from falling prices.
+    </div>`;
+    return;
+  }
+  grid.innerHTML = '';
+  active.forEach(cid => {
+    const qty = state.shorts[cid] || 0;
+    const basis = state.shortBasis[cid] || 0;
+    const arr = state.prices[cid] || [];
+    const last = arr[arr.length-1] || 100;
+    const prev = arr[arr.length-2] || last;
+    const change = (last - prev) / (prev || 1);
+    const pnl = qty * (basis - last);
+    const pnlClass = pnl >= 0 ? 'text-green-600' : 'text-red-600';
+    const meta = cropMeta(cid);
+    const card = document.createElement('div');
+    card.className = 'plant-card bg-white rounded-lg p-6 shadow-sm border border-gray-200 fade-in';
+    card.innerHTML = `
+      <div class="flex items-start justify-between">
+        <div>
+          <div class="plant-emoji mb-2">${meta.emoji}</div>
+          <h4 class="text-lg font-semibold">${meta.name}</h4>
+          <p class="text-sm text-gray-500">Borrowed ${qty} @ ${fmt(basis)}</p>
+          <p class="text-sm font-mono ${pnlClass}">${fmtSigned(pnl)} unrealized</p>
+        </div>
+        <div class="text-right">
+          <div class="text-2xl font-mono font-semibold">${fmt(last)}</div>
+          <div class="${change>0?'price-up':(change<0?'price-down':'price-neutral')} text-sm">${pct(change)}</div>
+        </div>
+      </div>
+      <div class="mt-4">
+        <button class="w-full bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700" data-crop="${cid}">Manage</button>
+      </div>
+    `;
+    card.querySelector('button').addEventListener('click', ()=> openTradeModal(cid));
+    grid.appendChild(card);
+  });
+}
+
 function renderPortfolio(){
   // Compute total value
   const last = latestPrices();
@@ -483,12 +585,16 @@ function renderPortfolio(){
   let growth = 0;
   for(const cid of state.crops){
     const qty = state.holdings[cid] || 0;
+    const shortQty = state.shorts[cid] || 0;
     plants += qty;
+    plants -= shortQty;
     value += qty * (last[cid]||0);
+    value -= shortQty * (last[cid]||0);
     const series = state.prices[cid] || [];
     if(series.length > 1){
       const delta = series[series.length-1] - series[series.length-2];
       growth += qty * delta;
+      growth -= shortQty * delta;
     }
   }
   document.getElementById('header-cash').textContent = fmt(state.cash);
@@ -504,8 +610,11 @@ function renderPortfolio(){
 
   // Render holdings table
   const container = document.getElementById('portfolio-holdings');
-  if(plants === 0){
-    container.innerHTML = `<div class="p-8 text-center text-gray-500"><p class="text-lg mb-2">Your garden is empty!</p><p>Start investing in plants to grow your wealth.</p></div>`;
+  const hasLongs = state.crops.some(cid => (state.holdings[cid]||0) > 0);
+  const hasShorts = state.crops.some(cid => (state.shorts[cid]||0) > 0);
+  if(!hasLongs && !hasShorts){
+    container.innerHTML = `<div class="p-8 text-center text-gray-500"><p class="text-lg mb-2">Your garden is empty!</p><p>Start investing or shorting to grow your wealth.</p></div>`;
+    renderShorts();
     return;
   }
   const rows = state.crops.filter(cid => (state.holdings[cid]||0) > 0).map(cid=>{
@@ -526,20 +635,66 @@ function renderPortfolio(){
       <td class="px-4 py-2 text-right font-mono ${plClass}">${fmtSigned(plValue)} (${plPct.toFixed(1)}%)</td>
     </tr>`;
   }).join('');
-  container.innerHTML = `
-    <table class="min-w-full text-sm">
-      <thead class="bg-gray-50">
-        <tr>
-          <th class="px-4 py-2 text-left">Crop</th>
-          <th class="px-4 py-2 text-right">Qty</th>
-          <th class="px-4 py-2 text-right">Price</th>
-          <th class="px-4 py-2 text-right">Avg Cost</th>
-          <th class="px-4 py-2 text-right">Value</th>
-          <th class="px-4 py-2 text-right">P/L</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+  const shortRows = state.crops.filter(cid => (state.shorts[cid]||0) > 0).map(cid=>{
+    const qty = state.shorts[cid]||0;
+    const p = last[cid]||0;
+    const meta = cropMeta(cid);
+    const basis = state.shortBasis[cid] || 0;
+    const plValue = qty ? qty * (basis - p) : 0;
+    const plPct = basis > 0 ? ((basis - p) / basis) * 100 : 0;
+    const plClass = plValue >= 0 ? 'text-green-600' : 'text-red-600';
+    return `<tr>
+      <td class="px-4 py-2">${meta.name}</td>
+      <td class="px-4 py-2 text-right font-mono">${qty}</td>
+      <td class="px-4 py-2 text-right font-mono">${fmt(p)}</td>
+      <td class="px-4 py-2 text-right font-mono">${fmt(basis)}</td>
+      <td class="px-4 py-2 text-right font-mono">${fmt(qty * p)}</td>
+      <td class="px-4 py-2 text-right font-mono ${plClass}">${fmtSigned(plValue)} (${plPct.toFixed(1)}%)</td>
+    </tr>`;
+  }).join('');
+
+  let html = '';
+  if(hasLongs){
+    html += `
+      <div>
+        <h4 class="px-4 pt-2 text-sm font-semibold text-gray-600">Long Holdings</h4>
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-4 py-2 text-left">Crop</th>
+              <th class="px-4 py-2 text-right">Qty</th>
+              <th class="px-4 py-2 text-right">Price</th>
+              <th class="px-4 py-2 text-right">Avg Cost</th>
+              <th class="px-4 py-2 text-right">Value</th>
+              <th class="px-4 py-2 text-right">P/L</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+  if(hasShorts){
+    html += `
+      <div class="mt-6">
+        <h4 class="px-4 pt-2 text-sm font-semibold text-gray-600">Short Positions</h4>
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-4 py-2 text-left">Crop</th>
+              <th class="px-4 py-2 text-right">Qty</th>
+              <th class="px-4 py-2 text-right">Price</th>
+              <th class="px-4 py-2 text-right">Avg Borrow</th>
+              <th class="px-4 py-2 text-right">Obligation</th>
+              <th class="px-4 py-2 text-right">P/L</th>
+            </tr>
+          </thead>
+          <tbody>${shortRows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  container.innerHTML = html;
+  renderShorts();
 }
 
 function updateHeader(){ renderPortfolio(); }
@@ -565,6 +720,8 @@ function openTradeModal(cid){
   document.getElementById('modal-available-cash').textContent = fmt(state.cash);
   const owned = state.holdings[cid]||0;
   const basis = state.costBasis[cid] || 0;
+  const borrowed = state.shorts[cid] || 0;
+  const borrowBasis = state.shortBasis[cid] || 0;
   const hi = document.getElementById('holdings-info');
   if(owned>0){
     hi.classList.remove('hidden');
@@ -575,6 +732,14 @@ function openTradeModal(cid){
     }
   } else {
     hi.classList.add('hidden');
+  }
+  const si = document.getElementById('short-info');
+  if(borrowed>0){
+    si.classList.remove('hidden');
+    document.getElementById('modal-short-qty').textContent = `${borrowed} plants`;
+    document.getElementById('modal-short-basis').textContent = `${fmt(borrowBasis)} avg borrow`;
+  } else {
+    si.classList.add('hidden');
   }
   document.getElementById('trade-quantity').value = 1;
   updateTradeTotal();
@@ -678,6 +843,46 @@ function executeSell(){
   toast(`Sold ${qty} ${currentCrop}`);
 }
 
+function executeShort(){
+  const qty = parseInt(document.getElementById('trade-quantity').value || '0',10);
+  if(!qty || qty < 1) return;
+  const price = (state.prices[currentCrop]||[]).slice(-1)[0] || 0;
+  const proceeds = qty * price;
+  state.cash += proceeds;
+  const prevQty = state.shorts[currentCrop] || 0;
+  const prevBasis = state.shortBasis[currentCrop] || 0;
+  const newQty = prevQty + qty;
+  const totalBorrow = prevQty * prevBasis + qty * price;
+  state.shorts[currentCrop] = newQty;
+  state.shortBasis[currentCrop] = newQty ? totalBorrow / newQty : 0;
+  state.txns.unshift({t: Date.now(), type:'SHORT', cid: currentCrop, qty, price});
+  renderPortfolio();
+  renderTxns();
+  updateTradeTotal();
+  toast(`Borrowed ${qty} ${currentCrop} and sold short`);
+}
+
+function executeCover(){
+  const qty = parseInt(document.getElementById('trade-quantity').value || '0',10);
+  if(!qty || qty < 1) return;
+  const borrowed = state.shorts[currentCrop] || 0;
+  if(qty > borrowed){ toast('Not enough borrowed seeds'); return; }
+  const price = (state.prices[currentCrop]||[]).slice(-1)[0] || 0;
+  const cost = qty * price;
+  if(cost > state.cash){ toast('Not enough cash to cover'); return; }
+  state.cash -= cost;
+  state.shorts[currentCrop] = borrowed - qty;
+  if(state.shorts[currentCrop] <= 0){
+    state.shorts[currentCrop] = 0;
+    state.shortBasis[currentCrop] = 0;
+  }
+  state.txns.unshift({t: Date.now(), type:'COVER', cid: currentCrop, qty, price});
+  renderPortfolio();
+  renderTxns();
+  updateTradeTotal();
+  toast(`Covered ${qty} ${currentCrop}`);
+}
+
 function renderTxns(){
   const list = document.getElementById('transactions-list');
   if(!state.txns.length){
@@ -685,7 +890,11 @@ function renderTxns(){
     return;
   }
   list.innerHTML = state.txns.slice(0,10).map(x=>{
-    const color = x.type === 'BUY' ? 'text-green-700' : 'text-red-700';
+    let color = 'text-gray-700';
+    if(x.type === 'BUY') color = 'text-green-700';
+    else if(x.type === 'SELL') color = 'text-red-700';
+    else if(x.type === 'SHORT') color = 'text-yellow-600';
+    else if(x.type === 'COVER') color = 'text-blue-700';
     const meta = cropMeta(x.cid);
     return `<div class="flex justify-between items-center px-4 py-2 border-b border-gray-100">
       <div class="${color} font-semibold">${x.type}</div>
