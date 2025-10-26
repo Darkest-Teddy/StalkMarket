@@ -6,6 +6,7 @@
     --pixel: 4px;
     --pixel-2: 8px;
     --outline: 2px;
+    --outline-thin: 1px;
     /* Button theme: dark blue */
     --btn-blue: #153e75;          /* dark blue base */
     --btn-blue-hover: #123764;    /* darker on hover */
@@ -122,9 +123,11 @@ h1, h2, h3, h4 {
 /* Utility class to force beige text */
 .beige-text { color: #c8836b !important; }
 
+/* Light green inner box inside panels */
+
 /* Lighten only disclaimer and section headings outside signs */
 #intro-overlay p,
-#intro-overlay .text-gray-700,
+#intro-overlay .text-gray-900,
 #intro-overlay .text-gray-500,
 #intro-overlay .font-semibold { color: #e6e6e6 !important; }
 
@@ -211,12 +214,17 @@ h1, h2, h3, h4 {
 
 .plant-card {
     transition: transform 0.2s, box-shadow 0.2s;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    justify-content: space-between;
 }
 
 .plant-card:hover {
     transform: scale(1.05);
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
 }
+
 
 .plant-emoji {
     font-size: 4rem;
@@ -295,22 +303,58 @@ h1, h2, h3, h4 {
     box-shadow: var(--pixel) var(--pixel) 0 #0a2f1d;
 }
 
+/* Make overlay background match site green */
+#intro-overlay {
+    background: #1f8a51 !important; /* same as .pixel-bg base */
+}
+
+/* Hide header banner while disclaimer overlay is visible */
+#intro-overlay:not(.hidden) ~ header.pixel-header {
+    display: none;
+}
+
+/* Center all disclaimer text content */
+#intro-overlay p,
+#intro-overlay h1,
+#intro-overlay .text-xs,
+#intro-overlay .space-y-4 { text-align: center !important; }
+
+.no-outline,
+.no-outline * {
+    text-shadow: none !important;
+}
+
+.pixel-thin,
+.pixel-thin * {
+    text-shadow:
+      calc(var(--outline-thin) * -1) 0 #000,
+      var(--outline-thin) 0 #000,
+      0 calc(var(--outline-thin) * -1) #000,
+      0 var(--outline-thin) #000,
+      calc(var(--outline-thin) * -1) calc(var(--outline-thin) * -1) #000,
+      var(--outline-thin) calc(var(--outline-thin) * -1) #000,
+      calc(var(--outline-thin) * -1) var(--outline-thin) #000,
+      var(--outline-thin) var(--outline-thin) #000;
+}
 .garden-grid {
     display: grid;
-    grid-template-columns: repeat(8, minmax(120px, 1fr));
-    gap: 1rem;
+    grid-template-columns: repeat(8, minmax(64px, 1fr));
+    gap: 8px;
+    align-items: start;
+}
+
+.garden-plot {
+    position: relative;
+    width: 100%;
+    display: inline-block;
 }
 
 .garden-column {
     display: flex;
     flex-direction: column;
-    background-image: none;
-    background-color: #ffffff;
-    border: 1px solid rgba(16, 185, 129, 0.25);
-    border-radius: 16px;
-    padding: 12px;
-    box-shadow: 0 6px 18px rgba(16, 95, 63, 0.08);
-    min-height: 320px;
+    gap: 6px;
+    background: transparent;
+    padding: 0;
 }
 
 .garden-column-header {
@@ -341,29 +385,28 @@ h1, h2, h3, h4 {
     justify-content: flex-start;
 }
 
-.garden-plot {
-    position: relative;
-    height: 82px;
-    border-radius: 12px;
-    background-color: #ffffff;
-    background-size: cover;
-    background-position: center;
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-    padding-bottom: 6px;
-    box-shadow: inset 0 -6px 12px rgba(0,0,0,0.12);
-}
-
-.garden-plot--empty {
-    opacity: 0.35;
+/* Raw dirt tile image styling (preserve rough edges, responsive) */
+.garden-tile {
+    image-rendering: pixelated;
+    width: 100%;
+    height: auto;
+    display: block;
 }
 
 .garden-plant {
-    max-height: 72px;
-    width: auto;
-    object-fit: contain;
+    position: absolute;
+    left: 50%;
+    bottom: 10%;
+    transform: translateX(-50%);
+    width: 65%;
+    height: auto;
+    image-rendering: pixelated;
     filter: drop-shadow(0 4px 6px rgba(0,0,0,0.18));
+    pointer-events: none;
+}
+
+.garden-plot--empty {
+    opacity: 0.6;
 }
 
 .market-card-image {

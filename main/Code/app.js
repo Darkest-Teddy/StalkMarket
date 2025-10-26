@@ -63,8 +63,8 @@ const GARDEN_SPRITE_OVERRIDES = {
   truffle: 'parsnip',
 };
 const GARDEN_SPRITE_POOL = ['wheat','pumpkin','tomato','potato','carrot','radish','beet','jalapeno','califlower'];
-const MAX_GARDEN_COLUMNS = 8;
-const BASE_GARDEN_ROWS = 4;
+const MAX_GARDEN_COLUMNS = 8; // 8 columns horizontally
+const BASE_GARDEN_ROWS = 1;   // 1 row (8 tiles total)
 const SPRITE_BASE = '../Objects';
 const TILE_BASE = '../Tiles';
 const MIN_HISTORY_POINTS = 20;
@@ -649,7 +649,7 @@ function renderMarket(){
           <div class="${color} text-sm">${pct(change)}</div>
         </div>
       </div>
-      <div class="mt-4">
+      <div class="mt-auto pt-4">
         <button class="w-full bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700" data-crop="${cid}">Trade</button>
       </div>
     `;
@@ -694,7 +694,7 @@ function renderShorts(){
           <div class="${change>0?'price-up':(change<0?'price-down':'price-neutral')} text-sm">${pct(change)}</div>
         </div>
       </div>
-      <div class="mt-4">
+      <div class="mt-auto pt-4">
         <button class="w-full bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700" data-crop="${cid}">Manage</button>
       </div>
     `;
@@ -759,9 +759,14 @@ function ensureGardenSprite(cid, idx){
 function createGardenPlot(sprite, stage){
   const plot = document.createElement('div');
   plot.className = 'garden-plot';
-  // Use a clean white tile background (no texture)
-  plot.style.backgroundImage = 'none';
-  if(sprite != null && stage != null){
+
+  const tile = document.createElement('img');
+  tile.src = `${TILE_BASE}/dirt.png`;
+  tile.alt = 'dirt tile';
+  tile.className = 'garden-tile';
+  plot.appendChild(tile);
+
+  if(sprite && stage !== null && stage !== undefined){
     const img = document.createElement('img');
     img.src = `${SPRITE_BASE}/${sprite}_${stage}.png`;
     img.alt = sprite;
@@ -770,6 +775,7 @@ function createGardenPlot(sprite, stage){
   } else {
     plot.classList.add('garden-plot--empty');
   }
+
   return plot;
 }
 
@@ -777,49 +783,35 @@ function renderGarden(){
   const grid = document.getElementById('garden-grid');
   if(!grid) return;
   grid.innerHTML = '';
+
   const crops = state.crops.slice(0, MAX_GARDEN_COLUMNS);
-  for(let i=0; i<MAX_GARDEN_COLUMNS; i++){
-    const cid = crops[i];
+  for(let i = 0; i < MAX_GARDEN_COLUMNS; i++){
     const column = document.createElement('div');
     column.className = 'garden-column';
-    const header = document.createElement('div');
-    header.className = 'garden-column-header';
-    if(cid){
-      const meta = cropMeta(cid);
-      const qty = Math.max(0, state.holdings[cid]||0);
-      header.innerHTML = `<span class="garden-name">${meta.name}</span><span class="garden-qty">${qty} seeds</span>`;
-    } else {
-      header.innerHTML = `<span class="garden-name text-gray-400">Empty Plot</span>`;
-    }
-    column.appendChild(header);
 
-    const plots = document.createElement('div');
-    plots.className = 'garden-plots';
-    const plotData = [];
+    const cid = crops[i];
     if(cid){
-      const qty = Math.max(0, state.holdings[cid]||0);
       const sprite = ensureGardenSprite(cid, i);
-      const fullCount = Math.floor(qty / 20);
-      const remainder = qty % 20;
-      for(let j=0;j<fullCount;j++){
-        plotData.push({sprite, stage: 4});
+      const qty = Math.max(0, state.holdings[cid] || 0);
+      const tileCount = Math.max(1, Math.ceil(qty / 20));
+
+      for(let t = 0; t < tileCount; t++){
+        const remaining = Math.max(0, qty - t * 20);
+        const portion = Math.min(remaining, 20);
+        let stage = null;
+        let tileSprite = null;
+        if(portion > 0){
+          const ratio = portion / 20;
+          stage = Math.ceil(ratio * 4);
+          stage = Math.max(1, Math.min(4, stage));
+          tileSprite = sprite;
+        }
+        column.appendChild(createGardenPlot(tileSprite, stage));
       }
-      if(remainder > 0){
-        const stage = Math.min(3, Math.max(0, Math.floor((remainder / 20) * 4)));
-        plotData.push({sprite, stage});
-      }
+    } else {
+      column.appendChild(createGardenPlot(null, null));
     }
-    while(plotData.length < BASE_GARDEN_ROWS){
-      plotData.push(null);
-    }
-    plotData.forEach(data => {
-      if(data){
-        plots.appendChild(createGardenPlot(data.sprite, data.stage));
-      }else{
-        plots.appendChild(createGardenPlot(null, null));
-      }
-    });
-    column.appendChild(plots);
+
     grid.appendChild(column);
   }
 }
@@ -1024,7 +1016,7 @@ function renderTxns(){
     return;
   }
   list.innerHTML = state.txns.slice(0,10).map(x=>{
-    let color = 'text-gray-700';
+    let color = 'text-gray-900';
     if(x.type === 'BUY') color = 'text-green-700';
     else if(x.type === 'SELL') color = 'text-red-700';
     else if(x.type === 'SHORT') color = 'text-yellow-600';
