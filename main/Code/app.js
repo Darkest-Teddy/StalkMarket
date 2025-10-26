@@ -67,6 +67,7 @@ const MAX_GARDEN_COLUMNS = 8;
 const BASE_GARDEN_ROWS = 4;
 const SPRITE_BASE = '../Objects';
 const TILE_BASE = '../Tiles';
+const MIN_HISTORY_POINTS = 20;
 
 // ---------- Utils ----------
 const fmt = (n) => '$' + (n || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
@@ -85,6 +86,23 @@ function toast(msg) {
 }
 
 function sum(arr){ return arr.reduce((a,b)=>a+b,0); }
+
+function extendHistoryBackward(priceMap, minPoints = MIN_HISTORY_POINTS){
+  const out = {};
+  Object.entries(priceMap).forEach(([cid, raw]) => {
+    const series = Array.isArray(raw) ? [...raw] : [];
+    if(!series.length){ series.push(100); }
+    let prev = series[0];
+    while(series.length < minPoints){
+      const drift = 0.994 + Math.random() * 0.008;
+      const noise = 1 + (Math.random() - 0.5) * 0.015;
+      prev = Math.max(1, prev * drift * noise);
+      series.unshift(prev);
+    }
+    out[cid] = series;
+  });
+  return out;
+}
 
 // Estimate mu/sigma from history (simple, weekly)
 function estimateParams(prices){
@@ -233,13 +251,14 @@ function initTimeline(prices){
   Object.entries(prices).forEach(([cid, series])=>{
     const arr = Array.isArray(series) ? [...series] : [];
     state.fullHistory[cid] = arr;
-    state.prices[cid] = arr.length ? [arr[0]] : [];
+    state.prices[cid] = arr.length ? [...arr] : [];
     if(arr.length){
       max = Math.max(max, arr.length - 1);
     }
   });
-  state.currentStep = 0;
+  state.currentStep = max;
   state.maxStep = max;
+  state.timelineComplete = false;
   renderClock();
 }
 
@@ -385,7 +404,10 @@ async function newSeason() {
     const seasonId = j.season_id || 'S1';
     document.getElementById('season-id').textContent = seasonId;
 
-    const {prices, crops, events} = await fetchSeasonSnapshot(seasonId);
+    const snapshot = await fetchSeasonSnapshot(seasonId);
+    const history = extendHistoryBackward(snapshot.prices);
+    const crops = snapshot.crops;
+    const events = snapshot.events;
     const macro = await getMacro();
 
     state.seasonId = seasonId;
@@ -399,7 +421,7 @@ async function newSeason() {
     state.costBasis = {};
     state.shortBasis = {};
     state.gardenSprites = {};
-    initTimeline(prices);
+    initTimeline(history);
 
     renderMacro();
     renderMarket();
