@@ -1,16 +1,6 @@
-"""
-main.py — Unified FarmFinance FastAPI backend
-
-Combines:
- - RealMLAIEngine (sklearn-based models trained on simulated portfolios, training runs in background)
- - Optional StockLLM wrapper (if `stock_llm` module + torch + model.pt provided)
- - FRED macro integration (optional)
- - Event engine, simulate, forecast, montecarlo, report endpoints
- - CORS middleware and optional StaticFiles frontend serve
-"""
-
 import os
 import math
+from pyexpat import model
 import time
 import random
 import copy
@@ -121,7 +111,7 @@ class LLMWrapper:
                 out = self.model(arr)
             val = float(np.array(out.cpu().numpy()).flatten()[0])
             # map to a reasonable range around 1.0
-            return float(max(0.5, min(1.5, 0.98 + 0.1 * val)))
+            return float(max(0.95, min(1.5, 1.0 + 0.1 * val)))
         except Exception as e:
             logger.exception("LLM predict error: %s", e)
             return 1.0
@@ -129,6 +119,19 @@ class LLMWrapper:
 
 LLM = LLMWrapper(model_path="model.pt")
 
+def compute_risk_score(portfolio, market):
+    weights = np.array(list(portfolio.values()))
+    hhi = np.sum(weights**2)
+
+    vol = np.std([market[c]['volatility'] for c in portfolio])
+
+    leverage = portfolio.get('leverage', 1.0)
+
+    macro_factor = 1.2 if market.get('recession', False) else 1.0
+
+    raw_score = 0.5*hhi + 0.3*vol + 0.2*leverage
+    risk_score = np.clip(raw_score * macro_factor, 0.0, 1.0)
+    return risk_score
 
 # ------------------------------
 # Price step function — stochastic + behavioral + optional LLM
@@ -147,10 +150,26 @@ def step_price(P: float, mu: float, sigma: float, dt: float, seasonality_t: floa
     P_stochastic = P * math.exp(log_ret)
 
     # Behavioral dampening: placeholder risk proxy
-    risk_score = random.uniform(0.0, 1.0)
-    vol_factor = 1.0 - 0.5 * risk_score
+    risk_score = compute_risk_score({'wheat':0.4,'corn':0.3,'berries':0.2,'truffle':0.1}, {'wheat':{'volatility':0.1},'corn':{'volatility':0.15},'berries':{'volatility':0.3},'truffle':{'volatility':0.25},'recession':False})
+    vol_factor = 1.0 - 0.5 * risk_score  # reduces fluctuations when risk_score high
     P_adjusted = P + (P_stochastic - P) * vol_factor
+    model = StockLLM()
+    model.load_state_dict(torch.load("model.pt"))
+    model.eval()
+    ai_input = torch.tensor([[P, mu, sigma, dt, seasonality_t,
+                                lam, mu_j, sig_j, risk_score]], dtype=torch.float32)
+    ai_pred = None
+    try:
+        with torch.no_grad():
+            ai_output = model(ai_input).numpy().flatten()
+    except IndexError as e:
+        print("AI input shape:", ai_input.shape)
+        print("AI input max value:", ai_input.max())
+        raise e
 
+    ai_pred = ( 0.98 + float(ai_output[0])) * P
+    alpha = 0.8
+    P_adjusted = ai_pred * (1 - alpha) + P_adjusted * alpha
     # LLM-driven multiplier if available
     if use_llm and LLM.available:
         feat = llm_features if llm_features is not None else [P, mu, sigma, dt, seasonality_t, lam, mu_j, sig_j, risk_score]
@@ -475,6 +494,7 @@ for c in DEFAULT_CROPS:
     DB.crops[c["id"]] = c
 
 
+
 @dataclass
 class EventRule:
     id: str
@@ -774,7 +794,7 @@ def simulate(req: SimulateRequest):
         for (cid, mu_nom, sig_adj, cp) in adj:
             base_next = step_price(P[cid], mu_nom, sig_adj, req.dt, seas[cid],
                                    lam=cp.jump_lam * (1.3 if macro.get("recession", False) else 1.0),
-                                   mu_j=cp.jump_mu, sig_j=cp.jump_sig, use_llm=True)
+                                   mu_j=cp.jump_mu, sig_j=cp.jump_sig, use_llm=False)
             shock = engine.log_return_shock(cid)
             P[cid] = float(base_next * math.exp(shock))
             DB.prices[season_id].append({"ts": t, "crop_id": cid, "price": float(P[cid])})
