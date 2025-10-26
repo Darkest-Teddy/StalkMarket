@@ -98,3 +98,81 @@ h1, h2, h3, h4 {
 .modal-backdrop {
     backdrop-filter: blur(4px);
 }
+
+.garden-grid {
+    display: grid;
+    grid-template-columns: repeat(8, minmax(120px, 1fr));
+    gap: 1rem;
+}
+
+.garden-column {
+    display: flex;
+    flex-direction: column;
+    background-image: url('../Tiles/tdfarmtiles_grass.png');
+    background-size: cover;
+    background-position: center;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    border-radius: 16px;
+    padding: 12px;
+    box-shadow: 0 6px 18px rgba(16, 95, 63, 0.08);
+    min-height: 320px;
+}
+
+.garden-column-header {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 12px;
+}
+
+.garden-name {
+    font-family: var(--font-display);
+    font-weight: 600;
+    color: #047857;
+    text-transform: capitalize;
+}
+
+.garden-qty {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: #4b5563;
+}
+
+.garden-plots {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-grow: 1;
+    justify-content: flex-start;
+}
+
+.garden-plot {
+    position: relative;
+    height: 82px;
+    border-radius: 12px;
+    background-size: cover;
+    background-position: center;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 6px;
+    box-shadow: inset 0 -6px 12px rgba(0,0,0,0.12);
+}
+
+.garden-plot--empty {
+    opacity: 0.35;
+}
+
+.garden-plant {
+    max-height: 72px;
+    width: auto;
+    object-fit: contain;
+    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.18));
+}
+
+.market-card-image {
+    width: 64px;
+    height: 64px;
+    object-fit: contain;
+    filter: drop-shadow(0 6px 10px rgba(0,0,0,0.15));
+}

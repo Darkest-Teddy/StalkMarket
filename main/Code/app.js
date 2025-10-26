@@ -28,6 +28,9 @@ const state = {
   extending: false,
   timelineComplete: false,
   eventPopups: [],
+  educationalMode: false,
+  starting: false,
+  gardenSprites: {},
 };
 
 const CROPS_META = {
@@ -52,6 +55,18 @@ const CROPS_META = {
     tagline: 'Alt delicacy with rare windfalls',
   },
 };
+
+const GARDEN_SPRITE_OVERRIDES = {
+  wheat: 'wheat',
+  corn: 'pumpkin',
+  berries: 'tomato',
+  truffle: 'parsnip',
+};
+const GARDEN_SPRITE_POOL = ['wheat','pumpkin','tomato','potato','carrot','radish','beet','jalapeno','califlower'];
+const MAX_GARDEN_COLUMNS = 8;
+const BASE_GARDEN_ROWS = 4;
+const SPRITE_BASE = '../Objects';
+const TILE_BASE = '../Tiles';
 
 // ---------- Utils ----------
 const fmt = (n) => '$' + (n || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
@@ -151,6 +166,52 @@ function computeDiversificationHHI(){
     hhi += share * share;
   }
   return Math.min(1, Math.max(0, hhi));
+}
+
+function applyEducationalMode(enabled){
+  state.educationalMode = enabled;
+  localStorage.setItem('STALK_EDU_MODE', enabled ? '1' : '0');
+  const btn = document.getElementById('edu-mode-button');
+  if(btn){
+    if(enabled){
+      btn.textContent = 'Educational Mode: ON';
+      btn.classList.remove('bg-gray-200','text-gray-800');
+      btn.classList.add('bg-emerald-100','text-emerald-700');
+    }else{
+      btn.textContent = 'Educational Mode: OFF';
+      btn.classList.remove('bg-emerald-100','text-emerald-700');
+      btn.classList.add('bg-gray-200','text-gray-800');
+    }
+  }
+}
+
+function setupIntroOverlay(){
+  const overlay = document.getElementById('intro-overlay');
+  const startBtn = document.getElementById('start-button');
+  const eduBtn = document.getElementById('edu-mode-button');
+  const saved = localStorage.getItem('STALK_EDU_MODE') === '1';
+  applyEducationalMode(saved);
+
+  if(eduBtn){
+    eduBtn.addEventListener('click', ()=>{
+      applyEducationalMode(!state.educationalMode);
+      if(!overlay || overlay.classList.contains('hidden')){
+        toast(state.educationalMode ? 'Educational Mode active. Diversification pressure OFF.' : 'Educational Mode OFF. Diversification pressure ON.');
+      }
+    });
+  }
+
+  if(startBtn){
+    startBtn.addEventListener('click', async ()=>{
+      if(overlay){
+        overlay.classList.add('opacity-0','pointer-events-none');
+        setTimeout(()=> overlay.classList.add('hidden'), 400);
+      }
+      await newSeason();
+    });
+  }
+
+  renderGarden();
 }
 
 function resetTimeline(){
@@ -303,16 +364,24 @@ function toggleClock(){
 
 // ---------- API Calls ----------
 async function getMacro() {
-  const r = await fetch(`${API()}/macro`);
-  const j = await r.json();
-  return j.macro || j;
+  try{
+    const r = await fetch(`${API()}/macro`);
+    if(!r.ok) throw new Error(`macro ${r.status}`);
+    const j = await r.json();
+    return j.macro || j;
+  }catch(err){
+    console.error('macro fetch failed', err);
+    return {inflation_ann: 0.02, rf_rate_ann: 0.02, recession: false, term_spread: 1.0, vol_mult: 1.0, asof: 'Offline'};
+  }
 }
 
 async function newSeason() {
+  if(state.starting) return;
+  state.starting = true;
   try{
     const r = await fetch(`${API()}/demo_seed`, {method: 'POST'});
     const j = await r.json();
-    if(!j.ok){ toast('Failed to seed demo'); return; }
+    if(!j.ok){ throw new Error('demo seed failed'); }
     const seasonId = j.season_id || 'S1';
     document.getElementById('season-id').textContent = seasonId;
 
@@ -329,11 +398,11 @@ async function newSeason() {
     state.txns = [];
     state.costBasis = {};
     state.shortBasis = {};
+    state.gardenSprites = {};
     initTimeline(prices);
 
     renderMacro();
     renderMarket();
-    renderShorts();
     renderPortfolio();
     renderTxns();
     renderClock();
@@ -344,6 +413,8 @@ async function newSeason() {
   }catch(err){
     console.error(err);
     toast('Season start failed. Check backend server.');
+  }finally{
+    state.starting = false;
   }
 }
 
@@ -387,7 +458,7 @@ async function runMonteCarlo(){
 
 async function extendSeason(steps = 12){
   if(!state.seasonId) return null;
-  const diversification = computeDiversificationHHI();
+  const diversification = state.educationalMode ? 0 : computeDiversificationHHI();
   const r = await fetch(`${API()}/season/${encodeURIComponent(state.seasonId)}/advance`, {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
@@ -460,11 +531,18 @@ async function advanceTick(manual = false){
     }
     return false;
   }
+  const penaltyRaw = state.educationalMode ? 0 : Math.max(0, computeDiversificationHHI() - 0.35);
+  const dampFactor = penaltyRaw > 0 ? Math.max(0.55, 1 - 0.45 * penaltyRaw) : 1;
   state.currentStep += 1;
   state.crops.forEach(cid=>{
     const hist = state.fullHistory[cid] || [];
-    const next = hist[state.currentStep];
+    let next = hist[state.currentStep];
     if(next === undefined) return;
+    if(!state.educationalMode && penaltyRaw > 0){
+      const prev = hist[state.currentStep-1] ?? next;
+      next = prev + (next - prev) * dampFactor;
+      state.fullHistory[cid][state.currentStep] = next;
+    }
     const visible = state.prices[cid] || [];
     visible.push(next);
     if(visible.length > 180){
@@ -510,7 +588,7 @@ function renderMarket(){
     </div>`;
     return;
   }
-  for(const cid of state.crops){
+  state.crops.forEach((cid, idx)=>{
     const arr = state.prices[cid] || [];
     const last = arr[arr.length-1] || 100;
     const prev = arr[arr.length-2] || last;
@@ -537,7 +615,9 @@ function renderMarket(){
     card.innerHTML = `
       <div class="flex items-start justify-between">
         <div>
-          <div class="plant-emoji mb-2 ${change>0?'plant-thriving':'plant-wilting'}">${meta.emoji}</div>
+          <div class="mb-2 flex justify-center">
+            <img class="market-card-image" src="${SPRITE_BASE}/${ensureGardenSprite(cid, idx)}_0.png" alt="${meta.name} seed">
+          </div>
           <h4 class="text-lg font-semibold">${meta.name}</h4>
           <p class="text-sm text-gray-500">${meta.tagline}</p>
           ${positionHtml}
@@ -553,7 +633,7 @@ function renderMarket(){
     `;
     card.querySelector('button').addEventListener('click', ()=> openTradeModal(cid));
     grid.appendChild(card);
-  }
+  });
 }
 
 function renderShorts(){
@@ -632,93 +712,93 @@ function renderPortfolio(){
     growthEl.className = `text-2xl font-mono font-semibold ${growth >= 0 ? 'text-green-600' : 'text-red-600'}`;
   }
 
-  // Render holdings table
-  const container = document.getElementById('portfolio-holdings');
-  const hasLongs = state.crops.some(cid => (state.holdings[cid]||0) > 0);
-  const hasShorts = state.crops.some(cid => (state.shorts[cid]||0) > 0);
-  if(!hasLongs && !hasShorts){
-    container.innerHTML = `<div class="p-8 text-center text-gray-500"><p class="text-lg mb-2">Your garden is empty!</p><p>Start investing or shorting to grow your wealth.</p></div>`;
-    renderShorts();
-    return;
-  }
-  const rows = state.crops.filter(cid => (state.holdings[cid]||0) > 0).map(cid=>{
-    const qty = state.holdings[cid]||0;
-    const p = last[cid]||0;
-    const val = qty*p;
-    const meta = cropMeta(cid);
-    const basis = state.costBasis[cid] || 0;
-    const plValue = qty ? qty * (p - basis) : 0;
-    const plPct = basis > 0 ? ((p - basis) / basis) * 100 : 0;
-    const plClass = plValue >= 0 ? 'text-green-600' : 'text-red-600';
-    return `<tr>
-      <td class="px-4 py-2">${meta.name}</td>
-      <td class="px-4 py-2 text-right font-mono">${qty}</td>
-      <td class="px-4 py-2 text-right font-mono">${fmt(p)}</td>
-      <td class="px-4 py-2 text-right font-mono">${fmt(basis)}</td>
-      <td class="px-4 py-2 text-right font-mono">${fmt(val)}</td>
-      <td class="px-4 py-2 text-right font-mono ${plClass}">${fmtSigned(plValue)} (${plPct.toFixed(1)}%)</td>
-    </tr>`;
-  }).join('');
-  const shortRows = state.crops.filter(cid => (state.shorts[cid]||0) > 0).map(cid=>{
-    const qty = state.shorts[cid]||0;
-    const p = last[cid]||0;
-    const meta = cropMeta(cid);
-    const basis = state.shortBasis[cid] || 0;
-    const plValue = qty ? qty * (basis - p) : 0;
-    const plPct = basis > 0 ? ((basis - p) / basis) * 100 : 0;
-    const plClass = plValue >= 0 ? 'text-green-600' : 'text-red-600';
-    return `<tr>
-      <td class="px-4 py-2">${meta.name}</td>
-      <td class="px-4 py-2 text-right font-mono">${qty}</td>
-      <td class="px-4 py-2 text-right font-mono">${fmt(p)}</td>
-      <td class="px-4 py-2 text-right font-mono">${fmt(basis)}</td>
-      <td class="px-4 py-2 text-right font-mono">${fmt(qty * p)}</td>
-      <td class="px-4 py-2 text-right font-mono ${plClass}">${fmtSigned(plValue)} (${plPct.toFixed(1)}%)</td>
-    </tr>`;
-  }).join('');
-
-  let html = '';
-  if(hasLongs){
-    html += `
-      <div>
-        <h4 class="px-4 pt-2 text-sm font-semibold text-gray-600">Long Holdings</h4>
-        <table class="min-w-full text-sm">
-          <thead class="bg-gray-50">
-            <tr>
-              <th class="px-4 py-2 text-left">Crop</th>
-              <th class="px-4 py-2 text-right">Qty</th>
-              <th class="px-4 py-2 text-right">Price</th>
-              <th class="px-4 py-2 text-right">Avg Cost</th>
-              <th class="px-4 py-2 text-right">Value</th>
-              <th class="px-4 py-2 text-right">P/L</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
-  }
-  if(hasShorts){
-    html += `
-      <div class="mt-6">
-        <h4 class="px-4 pt-2 text-sm font-semibold text-gray-600">Short Positions</h4>
-        <table class="min-w-full text-sm">
-          <thead class="bg-gray-50">
-            <tr>
-              <th class="px-4 py-2 text-left">Crop</th>
-              <th class="px-4 py-2 text-right">Qty</th>
-              <th class="px-4 py-2 text-right">Price</th>
-              <th class="px-4 py-2 text-right">Avg Borrow</th>
-              <th class="px-4 py-2 text-right">Obligation</th>
-              <th class="px-4 py-2 text-right">P/L</th>
-            </tr>
-          </thead>
-          <tbody>${shortRows}</tbody>
-        </table>
-      </div>`;
-  }
-
-  container.innerHTML = html;
+  renderGarden();
   renderShorts();
+}
+
+function ensureGardenSprite(cid, idx){
+  state.gardenSprites = state.gardenSprites || {};
+  if(state.gardenSprites[cid]) return state.gardenSprites[cid];
+  const override = GARDEN_SPRITE_OVERRIDES[cid];
+  if(override){
+    state.gardenSprites[cid] = override;
+    return override;
+  }
+  const used = new Set(Object.values(state.gardenSprites));
+  const pool = GARDEN_SPRITE_POOL;
+  let sprite = pool.find(name => !used.has(name));
+  if(!sprite){
+    sprite = pool[idx % pool.length] || pool[0];
+  }
+  state.gardenSprites[cid] = sprite;
+  return sprite;
+}
+
+function createGardenPlot(sprite, stage){
+  const plot = document.createElement('div');
+  plot.className = 'garden-plot';
+  plot.style.backgroundImage = `url("${TILE_BASE}/tdfarmtiles_dirt.png")`;
+  if(sprite != null && stage != null){
+    const img = document.createElement('img');
+    img.src = `${SPRITE_BASE}/${sprite}_${stage}.png`;
+    img.alt = sprite;
+    img.className = 'garden-plant';
+    plot.appendChild(img);
+  } else {
+    plot.classList.add('garden-plot--empty');
+  }
+  return plot;
+}
+
+function renderGarden(){
+  const grid = document.getElementById('garden-grid');
+  if(!grid) return;
+  grid.innerHTML = '';
+  const crops = state.crops.slice(0, MAX_GARDEN_COLUMNS);
+  for(let i=0; i<MAX_GARDEN_COLUMNS; i++){
+    const cid = crops[i];
+    const column = document.createElement('div');
+    column.className = 'garden-column';
+    const header = document.createElement('div');
+    header.className = 'garden-column-header';
+    if(cid){
+      const meta = cropMeta(cid);
+      const qty = Math.max(0, state.holdings[cid]||0);
+      header.innerHTML = `<span class="garden-name">${meta.name}</span><span class="garden-qty">${qty} seeds</span>`;
+    } else {
+      header.innerHTML = `<span class="garden-name text-gray-400">Empty Plot</span>`;
+    }
+    column.appendChild(header);
+
+    const plots = document.createElement('div');
+    plots.className = 'garden-plots';
+    const plotData = [];
+    if(cid){
+      const qty = Math.max(0, state.holdings[cid]||0);
+      const sprite = ensureGardenSprite(cid, i);
+      const fullCount = Math.floor(qty / 20);
+      const remainder = qty % 20;
+      for(let j=0;j<fullCount;j++){
+        plotData.push({sprite, stage: 4});
+      }
+      if(remainder > 0){
+        const stage = Math.min(3, Math.max(0, Math.floor((remainder / 20) * 4)));
+        plotData.push({sprite, stage});
+      }
+    }
+    while(plotData.length < BASE_GARDEN_ROWS){
+      plotData.push(null);
+    }
+    plotData.forEach(data => {
+      if(data){
+        plots.appendChild(createGardenPlot(data.sprite, data.stage));
+      }else{
+        plots.appendChild(createGardenPlot(null, null));
+      }
+    });
+    column.appendChild(plots);
+    grid.appendChild(column);
+  }
 }
 
 function updateHeader(){ renderPortfolio(); }
@@ -804,9 +884,16 @@ async function buildModalChart(cid){
 
   const labels = [...hist.map((_,i)=>`t-${hist.length-i}`), ...fc.mean.map((_,i)=>`+${i+1}`)];
   const histData = hist;
-  const forecastData = fc.mean ? fc.mean : [];
-  const bandLow = fc.p10 || [];
-  const bandHigh = fc.p90 || [];
+  let forecastData = fc.mean ? [...fc.mean] : [];
+  let bandLow = fc.p10 ? [...fc.p10] : [];
+  let bandHigh = fc.p90 ? [...fc.p90] : [];
+  if(hist.length && forecastData.length){
+    const anchor = hist[hist.length-1];
+    const offset = forecastData[0] - anchor;
+    forecastData = forecastData.map(v => v - offset);
+    bandLow = bandLow.map(v => v - offset);
+    bandHigh = bandHigh.map(v => v - offset);
+  }
 
   if(modalChart){ modalChart.destroy(); }
   modalChart = new Chart(ctx, {
@@ -955,13 +1042,12 @@ document.getElementById('btn-step').addEventListener('click', async ()=>{
 
 // ---------- Boot ----------
 (async function boot(){
+  setupIntroOverlay();
   try{
     const macro = await getMacro();
     state.macro = macro || {};
     renderMacro();
   }catch(e){
-    // ignore
+    console.error('macro fetch failed', e);
   }
-  // Auto-start one season on load for demo
-  await newSeason();
 })();

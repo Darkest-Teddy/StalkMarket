@@ -12,6 +12,39 @@
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body class="bg-gradient-to-br from-green-50 to-emerald-100 min-h-screen">
+
+  <!-- Intro / Disclaimer Overlay -->
+  <div id="intro-overlay" class="fixed inset-0 bg-white z-50 flex items-center justify-center px-4 py-8 transition-opacity duration-500">
+    <div class="max-w-2xl w-full bg-white border border-emerald-200 shadow-xl rounded-2xl p-8 space-y-6">
+      <div class="flex flex-col items-center text-center space-y-3">
+        <span class="text-6xl">🌱</span>
+        <h1 class="text-4xl font-display font-bold text-emerald-700">STALK Market</h1>
+      </div>
+      <div class="space-y-4 text-sm text-gray-700">
+        <p class="font-semibold">Disclaimer: This simulator is for educational purposes only. No real money is involved.</p>
+        <p>
+          Welcome to the STALK Market educational simulator. Prices, macro context, and outcomes in this experience are entirely fictional and crafted for learning. Nothing here should be treated as investment advice or as guidance for real-world trades.
+        </p>
+        <p>
+          Toggle Educational Mode to decide whether the portfolio concentration pressure is enabled. In Educational Mode, the market will not penalize concentrated bets; switch it off to feel how diversification shapes outcomes.
+        </p>
+      </div>
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <button id="edu-mode-button" class="flex-1 bg-gray-200 text-gray-800 px-4 py-3 rounded-lg font-semibold hover:bg-gray-300 transition">
+          Educational Mode: OFF
+        </button>
+        <button id="start-button" class="flex-1 bg-emerald-600 text-white px-4 py-3 rounded-lg font-semibold hover:bg-emerald-700 transition">
+          Launch Market
+        </button>
+      </div>
+      <p class="text-xs text-gray-500 text-center">
+        Educational Mode turns on the effect of your portfolio diversification on the behavior of the market.
+      </p>
+      <p class="text-xs text-gray-500 text-center">
+        Press “Launch Market” to begin. You acknowledge that all scenarios are simulated and for educational use only.
+      </p>
+    </div>
+  </div>
   <!-- Header -->
   <header class="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -97,17 +130,10 @@
       <div id="plant-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"></div>
     </section>
 
-    <!-- Portfolio Section -->
+    <!-- Garden Simulation -->
     <section class="mb-12">
-      <h3 class="text-2xl font-display font-semibold text-gray-900 mb-6">Your Portfolio 📊</h3>
-      <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        <div id="portfolio-holdings">
-          <div class="p-8 text-center text-gray-500">
-            <p class="text-lg mb-2">Your garden is empty!</p>
-            <p>Start investing in plants to grow your wealth.</p>
-          </div>
-        </div>
-      </div>
+      <h3 class="text-2xl font-display font-semibold text-gray-900 mb-6">Interactive Garden 🌱</h3>
+      <div id="garden-grid" class="garden-grid"></div>
     </section>
 
     <!-- Shorted Seeds Section -->

@@ -60,44 +60,67 @@ def _fred():
         raise RuntimeError("FRED_API_KEY not set")
     return Fred(api_key=key)
 
-def weekly_series_from_fred(series_id: str, start: str = "2010-01-01"):
+def weekly_series_from_fred(series_id: str, start: str = "2024-01-01", end: str = "2024-12-31"):
     fred = _fred()
-    s = fred.get_series(series_id)
+    s = fred.get_series(series_id, observation_start="2023-01-01", observation_end=end)
     if pd is None:
         raise RuntimeError("pandas required for FRED integration")
-    df = s[s.index >= pd.to_datetime(start)].to_frame(name=series_id)
+    df = s.to_frame(name=series_id)
     df.index = pd.to_datetime(df.index)
-    return df
+    mask = (df.index >= pd.to_datetime(start)) & (df.index <= pd.to_datetime(end))
+    return df.loc[mask]
 
-def compute_macro_context(start: str = "2010-01-01") -> dict:
-    if pd is None:
-        return {"inflation_ann": 0.02, "rf_rate_ann": 0.02, "recession": False, "term_spread": 1.0, "vol_mult": 1.0, "asof": None}
+def compute_macro_context(start: str = "2024-01-01", end: str = "2024-12-31") -> dict:
+    fallback = {"inflation_ann": 0.02, "rf_rate_ann": 0.02, "recession": False,
+                "term_spread": 1.0, "vol_mult": 1.0, "asof": None}
+    if not HAS_FRED:
+        return fallback
     try:
-        cpi = weekly_series_from_fred("CPIAUCSL", start).resample("W-FRI").ffill()
-        ff  = weekly_series_from_fred("FEDFUNDS", start).resample("W-FRI").mean()
-        try:
-            rec = weekly_series_from_fred("USREC", start).resample("W-FRI").ffill()
-        except Exception:
-            rec = pd.DataFrame(index=cpi.index, data={"USREC": 0.0})
-        try:
-            spr = weekly_series_from_fred("T10Y3M", start).resample("W-FRI").mean()
-        except Exception:
-            spr = pd.DataFrame(index=cpi.index, data={"T10Y3M": 1.0})
-        if len(cpi) > 52:
-            infl_ann = float(cpi.iloc[-1,0] / cpi.iloc[-52,0] - 1.0)
+        fred = _fred()
+        cpi_raw = fred.get_series("CPIAUCSL", observation_start="2023-01-01", observation_end=end).dropna()
+        ff_raw = fred.get_series("FEDFUNDS", observation_start="2023-01-01", observation_end=end).dropna()
+        rec_raw = fred.get_series("USREC", observation_start="2023-01-01", observation_end=end).dropna()
+        spr_raw = fred.get_series("T10Y3M", observation_start="2023-01-01", observation_end=end).dropna()
+
+        if pd is None:
+            raise RuntimeError("pandas required for FRED integration")
+        start_dt = pd.to_datetime(start)
+        end_dt = pd.to_datetime(end)
+        cpi = cpi_raw.loc[(cpi_raw.index >= start_dt) & (cpi_raw.index <= end_dt)]
+        ff = ff_raw.loc[(ff_raw.index >= start_dt) & (ff_raw.index <= end_dt)]
+        rec = rec_raw.loc[(rec_raw.index >= start_dt) & (rec_raw.index <= end_dt)]
+        spr = spr_raw.loc[(spr_raw.index >= start_dt) & (spr_raw.index <= end_dt)]
+
+        asof = str(end_dt.date())
+        if len(cpi) and len(cpi_raw) >= 13:
+            last = cpi.iloc[-1]
+            one_year_prior = cpi.index[-1] - pd.DateOffset(years=1)
+            hist_window = cpi_raw.loc[:one_year_prior]
+            if len(hist_window):
+                prev_year = hist_window.iloc[-1]
+                infl_ann = float(last / prev_year - 1.0)
+            else:
+                infl_ann = fallback["inflation_ann"]
         else:
-            infl_ann = 0.02
-        rf_ann = float((ff.iloc[-1,0] if len(ff) else 2.0) / 100.0)
-        recession = bool(float(rec.iloc[-1,0]) >= 0.5) if len(rec) else False
-        term_spread = float(spr.iloc[-1,0]) if len(spr) else 1.0
-        k = 0.3
-        vol_mult = 1.0 + k * max(0.0, -term_spread) / 2.0
-        vol_mult = float(np.clip(vol_mult, 0.8, 1.3))
-        asof = str(cpi.index[-1].date()) if len(cpi) else None
-        return dict(inflation_ann=infl_ann, rf_rate_ann=rf_ann, recession=recession,
-                    term_spread=term_spread, vol_mult=vol_mult, asof=asof)
-    except Exception:
-        return {"inflation_ann": 0.02, "rf_rate_ann": 0.02, "recession": False, "term_spread": 1.0, "vol_mult": 1.0, "asof": None}
+            infl_ann = fallback["inflation_ann"]
+
+        rf_ann = float(ff.iloc[-1]) / 100.0 if len(ff) else fallback["rf_rate_ann"]
+        recession = bool(rec.iloc[-1]) if len(rec) else False
+        term_spread = float(spr.iloc[-1]) if len(spr) else fallback["term_spread"]
+        penalty = max(0.0, -term_spread)
+        vol_mult = float(np.clip(1.0 + 0.35 * penalty, 0.75, 1.4))
+
+        return dict(
+            inflation_ann=float(infl_ann),
+            rf_rate_ann=float(rf_ann),
+            recession=recession,
+            term_spread=float(term_spread),
+            vol_mult=vol_mult,
+            asof=asof,
+        )
+    except Exception as exc:
+        print("[WARN] compute_macro_context fallback:", exc)
+        return fallback
 
 # ---------- Storage ----------
 class Storage:
@@ -292,7 +315,7 @@ def health(): return {"ok": True, "time": time.time()}
 
 @api.get("/macro")
 def macro_snapshot():
-    m = compute_macro_context(start="2010-01-01")
+    m = compute_macro_context(start="2024-01-01", end="2024-12-31")
     return {"ok": True, "macro": m}
 
 @api.get("/season/{season_id}/prices")
@@ -311,7 +334,7 @@ def advance_season(season_id: str, req: AdvanceRequest):
     crop_params = [CropParams(**p) for p in params]
     crop_ids = [cp.crop_id for cp in crop_params]
     season_meta = DB.seasons.get(season_id, {})
-    macro = season_meta.get("macro") or compute_macro_context(start="2010-01-01")
+    macro = season_meta.get("macro") or compute_macro_context(start="2024-01-01", end="2024-12-31")
     dt = float(season_meta.get("dt", 1.0/52.0))
     period = int(season_meta.get("period", max(52, len(DB.prices[season_id]) // max(1, len(crop_ids)))))
 
@@ -341,8 +364,8 @@ def advance_season(season_id: str, req: AdvanceRequest):
 
     div_hhi = float(req.diversification_hhi) if req.diversification_hhi is not None else 0.0
     penalty = max(0.0, min(1.0, div_hhi - 0.35))
-    mu_penalty = 0.08 * penalty
-    vol_multiplier = 1.0 + 0.25 * penalty
+    mu_penalty = 0.10 * penalty
+    vol_multiplier = 1.0 + 0.35 * penalty
 
     for step in range(req.steps):
         t = current_ts + 1 + step
@@ -361,6 +384,9 @@ def advance_season(season_id: str, req: AdvanceRequest):
             base_next = step_price(prev_price, mu_effective, sig_adj, dt, seas[cid],
                                    lam=cp.jump_lam * (1.3 if macro.get("recession", False) else 1.0),
                                    mu_j=cp.jump_mu, sig_j=cp.jump_sig)
+            if penalty > 0.0:
+                damp = max(0.6, 1.0 - 0.6 * penalty)
+                base_next *= damp
             shock = engine.log_return_shock(cid)
             price = float(base_next * math.exp(shock))
             latest_prices[cid] = price
@@ -373,7 +399,7 @@ def advance_season(season_id: str, req: AdvanceRequest):
 def simulate(req: SimulateRequest):
     np.random.seed(req.seed)
     season_id = req.season_id
-    macro = compute_macro_context(start="2010-01-01")
+    macro = compute_macro_context(start="2024-01-01", end="2024-12-31")
     engine = EventEngine(copy.deepcopy(DEFAULT_EVENT_RULES))
     DB.event_engines[season_id] = engine
     DB.season_params[season_id] = [cp.dict() for cp in req.crop_params]
