@@ -540,10 +540,17 @@ async function ensureFutureSteps(){
 
 async function advanceTick(manual = false){
   if(!state.seasonId) return false;
-  if(state.currentStep >= state.maxStep){
+
+  if(state.currentStep >= state.maxStep - 1){
     await ensureFutureSteps();
   }
-  if(state.currentStep >= state.maxStep){
+
+  const nextIndex = state.currentStep + 1;
+  const missingData = state.crops.some(cid=>{
+    const hist = state.fullHistory[cid] || [];
+    return hist[nextIndex] === undefined;
+  });
+  if(missingData){
     if(!state.timelineComplete){
       toast('Season timeline exhausted. Start a new season to keep growing.');
       state.timelineComplete = true;
@@ -553,17 +560,18 @@ async function advanceTick(manual = false){
     }
     return false;
   }
+
   const penaltyRaw = state.educationalMode ? 0 : Math.max(0, computeDiversificationHHI() - 0.35);
   const dampFactor = penaltyRaw > 0 ? Math.max(0.55, 1 - 0.45 * penaltyRaw) : 1;
-  state.currentStep += 1;
+  state.currentStep = nextIndex;
   state.crops.forEach(cid=>{
     const hist = state.fullHistory[cid] || [];
-    let next = hist[state.currentStep];
+    let next = hist[nextIndex];
     if(next === undefined) return;
     if(!state.educationalMode && penaltyRaw > 0){
-      const prev = hist[state.currentStep-1] ?? next;
+      const prev = hist[nextIndex-1] ?? next;
       next = prev + (next - prev) * dampFactor;
-      state.fullHistory[cid][state.currentStep] = next;
+      state.fullHistory[cid][nextIndex] = next;
     }
     const visible = state.prices[cid] || [];
     visible.push(next);

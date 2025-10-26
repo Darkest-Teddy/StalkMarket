@@ -51,7 +51,32 @@ h1, h2, h3, h4 {
 }
 
 .pixel-bg {
-    background: linear-gradient(#1f8a51, #1f8a51) fixed;
+    background-image: url('../Tiles/Background.png');
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    background-position: center;
+}
+
+.overlay-bg {
+    position: relative;
+    background-image: url('../Tiles/Background.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+.overlay-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: url('../Tiles/Background.png');
+    pointer-events: none;
+}
+
+.overlay-bg > * {
+    position: relative;
+    z-index: 1;
 }
 
 .pixel-logo {
@@ -88,10 +113,9 @@ h1, h2, h3, h4 {
     position: relative;
     color: #c8836b;
     border-radius: 0 !important;
-    border: var(--pixel) solid #2a2726 !important; /* outer dark frame */
-    box-shadow: var(--pixel) var(--pixel) 0 #0a2f1d !important; /* chunky drop */
+    border: var(--pixel) solid #2a2726 !important;
+    box-shadow: var(--pixel) var(--pixel) 0 #0a2f1d !important;
     background-image:
-      /* plank separators (thin dark lines) */
       repeating-linear-gradient(
         180deg,
         rgba(0,0,0,0.25) 0px,
@@ -99,7 +123,6 @@ h1, h2, h3, h4 {
         transparent 4px,
         transparent 32px
       ),
-      /* planks */
       repeating-linear-gradient(
         180deg,
         #8b4b34 0px,
@@ -107,7 +130,16 @@ h1, h2, h3, h4 {
         #7c422e 32px,
         #7c422e 64px
       );
-    background-color: #7f4630 !important; /* fallback */
+    background-color: #7f4630 !important;
+}
+
+.wood-panel::before {
+    display: none;
+}
+
+.wood-panel > * {
+    position: relative;
+    z-index: 1;
 }
 
 .wood-panel h1,
@@ -115,7 +147,14 @@ h1, h2, h3, h4 {
 .wood-panel h3,
 .wood-panel p,
 .wood-panel label,
-.wood-panel span { color: #c8836b !important; }
+.wood-panel span {
+    color: #f5ede0 !important;
+    text-shadow:
+      calc(var(--outline-thin) * -1) 0 rgba(0,0,0,0.8),
+      var(--outline-thin) 0 rgba(0,0,0,0.8),
+      0 calc(var(--outline-thin) * -1) rgba(0,0,0,0.8),
+      0 var(--outline-thin) rgba(0,0,0,0.8) !important;
+}
 
 /* Ensure key KPI values use beige as well */
 #stat-total-value,
@@ -123,6 +162,55 @@ h1, h2, h3, h4 {
 
 /* Utility class to force beige text */
 .beige-text { color: #c8836b !important; }
+
+.welcome-panel {
+    padding: 2rem;
+    border-radius: 0;
+}
+
+.welcome-panel .pixel-logo {
+    color: #fefae8;
+}
+
+.wood-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.9rem 1rem;
+    border: var(--pixel) solid #2a2726;
+    background-image:
+      repeating-linear-gradient(
+        180deg,
+        rgba(0,0,0,0.25) 0px,
+        rgba(0,0,0,0.25) 4px,
+        transparent 4px,
+        transparent 32px
+      ),
+      repeating-linear-gradient(
+        180deg,
+        #8b4b34 0px,
+        #8b4b34 32px,
+        #7c422e 32px,
+        #7c422e 64px
+      );
+    background-color: #7f4630;
+    color: #fff7e6;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.wood-button:hover {
+    transform: translate(-var(--pixel), -var(--pixel));
+    box-shadow: calc(var(--pixel) * 2) calc(var(--pixel) * 2) 0 #0a2f1d;
+    filter: brightness(1.05);
+}
+
+.wood-button:active {
+    transform: translate(0, 0);
+    box-shadow: var(--pixel) var(--pixel) 0 #0a2f1d;
+}
 
 /* Light green inner box inside panels */
 
@@ -180,7 +268,7 @@ h1, h2, h3, h4 {
 }
 
 .pixel-header {
-    background: rgba(31, 138, 81, 0.88); /* lighter transparent green (restored) */
+    background: #507238; /* lighter transparent green (restored) */
     border-bottom: var(--pixel) solid #0a2f1d;
 }
 
@@ -206,7 +294,7 @@ h1, h2, h3, h4 {
 #pixel-landscape {
     position: relative;
     width: 100%;
-    height: 220px;
+    height: 330px;
     background-image: url('../Tiles/Header.png');
     background-size: cover;
     background-position: center calc(80% - 40px);
@@ -449,7 +537,9 @@ h1, h2, h3, h4 {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    background: transparent;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
     padding: 0;
 }
 
@@ -519,6 +609,8 @@ h1, h2, h3, h4 {
     gap: 0.25rem;
     text-align: right;
     min-width: 6.5rem;
+    max-width: 7rem;
+    margin-right: 20px;
 }
 .price-display .text-2xl {
     line-height: 1.1;

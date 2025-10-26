@@ -68,6 +68,7 @@ logger = logging.getLogger("main")
 logging.basicConfig(level=logging.INFO)
 
 EPS = 1e-12
+Z90 = 1.2815515655446004
 
 
 # ------------------------------
@@ -136,10 +137,33 @@ def compute_risk_score(portfolio, market):
 # ------------------------------
 # Price step function — stochastic + behavioral + optional LLM
 # ------------------------------
+def _load_stock_llm():
+    if not hasattr(_load_stock_llm, "_cached"):
+        _load_stock_llm._cached = None
+    if _load_stock_llm._cached is not None:
+        return _load_stock_llm._cached
+    if StockLLM is None or not HAS_TORCH:
+        return None
+    weights_path = os.getenv("STOCK_LLM_WEIGHTS", "model.pt")
+    if not os.path.exists(weights_path):
+        logger.warning("StockLLM weights not found at %s", weights_path)
+        return None
+    try:
+        model = StockLLM()
+        state = torch.load(weights_path, map_location="cpu")
+        model.load_state_dict(state)
+        model.eval()
+        _load_stock_llm._cached = model
+        return model
+    except Exception as exc:
+        logger.warning("Failed to initialise StockLLM: %s", exc)
+        return None
+
+
 def step_price(P: float, mu: float, sigma: float, dt: float, seasonality_t: float,
                lam: float = 0.0, mu_j: float = 0.0, sig_j: float = 0.0,
                use_llm: bool = True, llm_features: Optional[List[float]] = None) -> float:
-    # Geometric Brownian motion-like step with seasonality and jumps
+    """Stochastic price step with optional ML/LLM adjustments."""
     Z = np.random.normal()
     log_ret = (mu - 0.5 * sigma**2) * dt + sigma * (dt**0.5) * Z
     log_ret += seasonality_t * dt
@@ -149,34 +173,35 @@ def step_price(P: float, mu: float, sigma: float, dt: float, seasonality_t: floa
             log_ret += np.random.normal(mu_j, sig_j) * jump_count
     P_stochastic = P * math.exp(log_ret)
 
-    # Behavioral dampening: placeholder risk proxy
-    risk_score = compute_risk_score({'wheat':0.4,'corn':0.3,'berries':0.2,'truffle':0.1}, {'wheat':{'volatility':0.1},'corn':{'volatility':0.15},'berries':{'volatility':0.3},'truffle':{'volatility':0.25},'recession':False})
-    vol_factor = 1.0 - 0.5 * risk_score  # reduces fluctuations when risk_score high
+    # behavioral dampening placeholder
+    risk_score = compute_risk_score(
+        {'wheat':0.4,'corn':0.3,'berries':0.2,'truffle':0.1},
+        {'wheat':{'volatility':0.1},'corn':{'volatility':0.15},'berries':{'volatility':0.3},'truffle':{'volatility':0.25},'recession':False}
+    )
+    vol_factor = 1.0 - 0.5 * risk_score
     P_adjusted = P + (P_stochastic - P) * vol_factor
-    model = StockLLM()
-    model.load_state_dict(torch.load("model.pt"))
-    model.eval()
-    ai_input = torch.tensor([[P, mu, sigma, dt, seasonality_t,
-                                lam, mu_j, sig_j, risk_score]], dtype=torch.float32)
-    ai_pred = None
-    try:
-        with torch.no_grad():
-            ai_output = model(ai_input).numpy().flatten()
-    except IndexError as e:
-        print("AI input shape:", ai_input.shape)
-        print("AI input max value:", ai_input.max())
-        raise e
 
-    ai_pred = ( 0.98 + float(ai_output[0])) * P
-    alpha = 0.8
-    P_adjusted = ai_pred * (1 - alpha) + P_adjusted * alpha
-    # LLM-driven multiplier if available
+    model = _load_stock_llm()
+    if use_llm and model is not None:
+        try:
+            ai_input = torch.tensor([[P, mu, sigma, dt, seasonality_t,
+                                      lam, mu_j, sig_j, risk_score]], dtype=torch.float32)
+            with torch.no_grad():
+                ai_output = model(ai_input).detach().cpu().numpy().flatten()
+            if ai_output.size > 0:
+                ai_pred = (0.98 + float(ai_output[0])) * P
+                alpha = 0.8
+                P_adjusted = ai_pred * (1 - alpha) + P_adjusted * alpha
+        except Exception as exc:
+            logger.warning("StockLLM inference failed: %s", exc)
+
     if use_llm and LLM.available:
         feat = llm_features if llm_features is not None else [P, mu, sigma, dt, seasonality_t, lam, mu_j, sig_j, risk_score]
         try:
             mult = LLM.predict_multiplier(feat)
             P_final = P_adjusted * mult
-        except Exception:
+        except Exception as exc:
+            logger.warning("LLM multiplier failed: %s", exc)
             P_final = P_adjusted
     else:
         P_final = P_adjusted
@@ -617,6 +642,59 @@ def compute_macro_context(start: str = "2024-01-01", end: str = "2024-12-31") ->
 
 
 # ------------------------------
+# Forecast helpers
+# ------------------------------
+def _forecast_from_series(series: List[float], horizon: int) -> Tuple[List[float], List[float], List[float]]:
+    """Return (mean, p10, p90) forecast paths for the next `horizon` steps."""
+    values = [float(v) for v in series if v is not None]
+    if not values:
+        return ([], [], [])
+    horizon = max(1, int(horizon))
+    arr = np.array(values, dtype=float)
+
+    if HAS_HW and len(arr) >= 8:
+        try:
+            model = ExponentialSmoothing(arr, trend="add", seasonal=None, initialization_method="estimated")
+            fit = model.fit(optimized=True)
+            forecast = np.maximum(fit.forecast(horizon), EPS)
+            resid = arr - fit.fittedvalues[: len(arr)]
+            sigma = float(np.std(resid)) if len(resid) else 0.0
+            if not np.isfinite(sigma) or sigma < EPS:
+                sigma = 0.01 * float(arr[-1])
+            lower = np.maximum(forecast - Z90 * sigma, EPS)
+            upper = forecast + Z90 * sigma
+            return (forecast.tolist(), lower.tolist(), upper.tolist())
+        except Exception as exc:
+            logger.warning("ExponentialSmoothing forecast failed: %s", exc)
+
+    if len(arr) < 2:
+        last = float(arr[-1])
+        return (
+            [last for _ in range(horizon)],
+            [last for _ in range(horizon)],
+            [last for _ in range(horizon)],
+        )
+
+    log_returns = np.diff(np.log(arr + EPS))
+    mu = float(np.mean(log_returns)) if len(log_returns) else 0.0
+    sigma = float(np.std(log_returns, ddof=1)) if len(log_returns) > 1 else 0.02
+    mean_path: List[float] = []
+    low_path: List[float] = []
+    high_path: List[float] = []
+    mean_price = float(arr[-1])
+    low_price = mean_price
+    high_price = mean_price
+    for _ in range(horizon):
+        mean_price = float(mean_price * math.exp(mu))
+        low_price = float(low_price * math.exp(mu - Z90 * sigma))
+        high_price = float(high_price * math.exp(mu + Z90 * sigma))
+        mean_path.append(max(mean_price, EPS))
+        low_path.append(max(low_price, EPS))
+        high_path.append(max(high_price, EPS))
+    return (mean_path, low_path, high_path)
+
+
+# ------------------------------
 # API Schemas
 # ------------------------------
 class CropParams(BaseModel):
@@ -882,6 +960,33 @@ def advance_season(season_id: str, req: AdvanceRequest):
             new_prices.append(rec)
 
     return {"season_id": season_id, "prices": new_prices, "events": new_events}
+
+
+@api.post("/forecast", response_model=ForecastResponse)
+def forecast_prices(req: ForecastRequest):
+    if req.season_id not in DB.prices:
+        raise HTTPException(404, "season not found")
+    horizon = max(1, min(int(req.horizon or 12), 104))
+    season_rows = DB.prices[req.season_id]
+    available_ids = sorted({row["crop_id"] for row in season_rows})
+    crop_ids = req.crop_ids if req.crop_ids else available_ids
+    forecasts: Dict[str, dict] = {}
+
+    history: Dict[str, List[Tuple[int, float]]] = {cid: [] for cid in crop_ids}
+    for row in season_rows:
+        cid = row["crop_id"]
+        if cid in history:
+            history[cid].append((row["ts"], float(row["price"])))
+
+    for cid, rows in history.items():
+        if not rows:
+            continue
+        rows.sort(key=lambda x: x[0])
+        prices = [price for _, price in rows]
+        mean_path, low_path, high_path = _forecast_from_series(prices, horizon)
+        forecasts[cid] = {"mean": mean_path, "p10": low_path, "p90": high_path}
+
+    return ForecastResponse(season_id=req.season_id, horizon=horizon, forecasts=forecasts)
 
 
 @api.post("/montecarlo", response_model=MonteCarloResponse)
