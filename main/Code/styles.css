@@ -24,27 +24,28 @@ h1, h2, h3, h4 {
 }
 
 .font-mono {
-    font-family: var(--font-pixel);
+    font-family: var(--font-mono);
 }
 
 .font-display {
-    font-family: var(--font-pixel);
+    font-family: var(--font-display);
 }
 
 /* --- Pixel Theme --- */
 .pixelify,
 .pixelify * {
     image-rendering: pixelated;
+    image-rendering: crisp-edges; /* cross-browser support */
     font-family: var(--font-pixel) !important;
     /* Global pixel text outline */
     text-shadow:
-      calc(var(--outline) * -1) 0 #000,
+      calc(var(--outline) * -1px) 0 #000,
       var(--outline) 0 #000,
-      0 calc(var(--outline) * -1) #000,
+      0 calc(var(--outline) * -1px) #000,
       0 var(--outline) #000,
-      calc(var(--outline) * -1) calc(var(--outline) * -1) #000,
-      var(--outline) calc(var(--outline) * -1) #000,
-      calc(var(--outline) * -1) var(--outline) #000,
+      calc(var(--outline) * -1px) calc(var(--outline) * -1px) #000,
+      var(--outline) calc(var(--outline) * -1px) #000,
+      calc(var(--outline) * -1px) var(--outline) #000,
       var(--outline) var(--outline) #000;
 }
 
@@ -128,7 +129,10 @@ h1, h2, h3, h4 {
 #intro-overlay .text-gray-500,
 #intro-overlay .font-semibold { color: #e6e6e6 !important; }
 
-.section-heading { color: #e6e6e6 !important; }
+.section-heading { 
+    color: #e6e6e6 !important; 
+    filter: drop-shadow(var(--pixel) var(--pixel) 0 #0a2f1d);
+}
 
 /* Pixel icon helper for inline images */
 .pixel-icon { image-rendering: pixelated; display: inline-block; vertical-align: -0.15em; }
@@ -184,10 +188,6 @@ h1, h2, h3, h4 {
     filter: drop-shadow(var(--pixel) var(--pixel) 0 #0a2f1d);
 }
 
-/* Drop shadow for section headings like Shorted Seeds, Recent Activity */
-.section-heading {
-    filter: drop-shadow(var(--pixel) var(--pixel) 0 #0a2f1d);
-}
 .pixel-header span.text-3xl { display: none; }
 
 /* Floating translucent banner behind the logo */
@@ -207,7 +207,7 @@ h1, h2, h3, h4 {
     background: linear-gradient(#2ba45f, #1f8a51);
     overflow: hidden;
 }
-#pixel-landscape svg { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+#pixel-landscape svg { width: 100%; height: 100%; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
 
 .plant-card {
     transition: transform 0.2s, box-shadow 0.2s;
@@ -234,25 +234,13 @@ h1, h2, h3, h4 {
 }
 
 @keyframes pulse {
-    0%, 100% {
-        transform: scale(1);
-    }
-    50% {
-        transform: scale(1.05);
-    }
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
 }
 
-.price-up {
-    color: rgb(34, 197, 94);
-}
-
-.price-down {
-    color: rgb(239, 68, 68);
-}
-
-.price-neutral {
-    color: rgb(107, 114, 128);
-}
+.price-up { color: rgb(34, 197, 94); }
+.price-down { color: rgb(239, 68, 68); }
+.price-neutral { color: rgb(107, 114, 128); }
 
 .loading-shimmer {
     background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
@@ -261,12 +249,8 @@ h1, h2, h3, h4 {
 }
 
 @keyframes shimmer {
-    0% {
-        background-position: 200% 0;
-    }
-    100% {
-        background-position: -200% 0;
-    }
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
 }
 
 .fade-in {
@@ -274,18 +258,13 @@ h1, h2, h3, h4 {
 }
 
 @keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 .modal-backdrop {
     backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px); /* Safari support */
 }
 
 /* Pixel styling for intro overlay */
@@ -355,9 +334,7 @@ h1, h2, h3, h4 {
     box-shadow: inset 0 -6px 12px rgba(0,0,0,0.12);
 }
 
-.garden-plot--empty {
-    opacity: 0.35;
-}
+.garden-plot--empty { opacity: 0.35; }
 
 .garden-plant {
     max-height: 72px;
@@ -374,6 +351,4 @@ h1, h2, h3, h4 {
 }
 
 /* Ensure plots/charts render on a white background */
-canvas {
-    background-color: #ffffff;
-}
+canvas { background-color: #ffffff; }

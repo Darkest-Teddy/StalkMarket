@@ -1,11 +1,8 @@
-from google import genai
-
 """
 FarmFinance — FastAPI backend (main.py)
 Includes: FRED macro integration, event engine, simulation, forecast, monte carlo,
 risk fitting, season prices endpoint, and report.
 """
-from __future__ import annotations
 
 import os, math, time, random, copy
 from typing import Dict, List, Optional
