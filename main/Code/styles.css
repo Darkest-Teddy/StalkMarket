@@ -629,9 +629,10 @@ h1, h2, h3, h4 {
     align-items: flex-end;
     gap: 0.25rem;
     text-align: right;
-    min-width: 6.5rem;
-    max-width: 7rem;
-    margin-right: 20px;
+    min-width: 6rem;
+    max-width: 6.5rem;
+    margin-right: 0;
+    flex: 0 0 auto;
 }
 .price-display .text-2xl {
     line-height: 1.1;
