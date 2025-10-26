@@ -2,7 +2,7 @@
 
 ## About Our Project
 Financial markets are complex and intimidating, making it hard for beginners to learn how investing works.  
-**StockGarden** simplifies financial education by turning investing into an interactive and visual experience — where **stocks grow like plants**.  
+**Stalk Market** simplifies financial education by turning investing into an interactive and visual experience — where **stocks grow like plants**.  
 Our platform helps users learn key financial principles safely, through simulation, gamification, and guided experimentation.
 
 At the core of our system is a **hybrid predictive model** combining traditional algorithmic forecasting with AI-based prediction:
