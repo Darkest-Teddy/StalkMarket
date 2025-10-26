@@ -2,23 +2,212 @@
     --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
     --font-display: 'Fredoka', 'Quicksand', sans-serif;
     --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+    --font-pixel: 'Press Start 2P', system-ui, -apple-system, sans-serif;
+    --pixel: 4px;
+    --pixel-2: 8px;
+    --outline: 2px;
+    /* Button theme: dark blue */
+    --btn-blue: #153e75;          /* dark blue base */
+    --btn-blue-hover: #123764;    /* darker on hover */
+    --btn-blue-border: #0a1e3a;   /* deep border/shadow */
+    --green-100: #e8ffe8;
+    --green-300: #9be7a8;
+    --green-500: #2ecc71;
+    --green-700: #1b8a4a;
+    --green-900: #0c4a2e;
 }
 
-* {
-    font-family: var(--font-sans);
-}
+* { font-family: var(--font-sans); }
 
 h1, h2, h3, h4 {
     font-family: var(--font-display);
 }
 
 .font-mono {
-    font-family: var(--font-mono);
+    font-family: var(--font-pixel);
 }
 
 .font-display {
-    font-family: var(--font-display);
+    font-family: var(--font-pixel);
 }
+
+/* --- Pixel Theme --- */
+.pixelify,
+.pixelify * {
+    image-rendering: pixelated;
+    font-family: var(--font-pixel) !important;
+    /* Global pixel text outline */
+    text-shadow:
+      calc(var(--outline) * -1) 0 #000,
+      var(--outline) 0 #000,
+      0 calc(var(--outline) * -1) #000,
+      0 var(--outline) #000,
+      calc(var(--outline) * -1) calc(var(--outline) * -1) #000,
+      var(--outline) calc(var(--outline) * -1) #000,
+      calc(var(--outline) * -1) var(--outline) #000,
+      var(--outline) var(--outline) #000;
+}
+
+.pixel-bg {
+    background: linear-gradient(#1f8a51, #1f8a51) fixed;
+}
+
+.pixel-logo {
+    font-family: var(--font-pixel);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #ffffff;
+    text-shadow:
+      calc(var(--pixel) * -1) 0 #000,
+      var(--pixel) 0 #000,
+      0 calc(var(--pixel) * -1) #000,
+      0 var(--pixel) #000,
+      calc(var(--pixel) * -1) var(--pixel) #000,
+      var(--pixel) var(--pixel) #000,
+      calc(var(--pixel) * 2) calc(var(--pixel) * 2) #0a2f1d;
+}
+
+.pixel-shadow {
+    box-shadow: var(--pixel) var(--pixel) 0 #0a2f1d, calc(var(--pixel) * 2) calc(var(--pixel) * 2) 0 #061e13;
+}
+
+.pixel-card {
+    background: #ffffff;
+    border: var(--pixel) solid #0a2f1d;
+    border-radius: 0 !important;
+}
+
+/* Panels: pixel font + wood sign look */
+.pixel-panel {
+    font-family: var(--font-pixel);
+}
+
+.wood-panel {
+    position: relative;
+    color: #c8836b;
+    border-radius: 0 !important;
+    border: var(--pixel) solid #2a2726 !important; /* outer dark frame */
+    box-shadow: var(--pixel) var(--pixel) 0 #0a2f1d !important; /* chunky drop */
+    background-image:
+      /* plank separators (thin dark lines) */
+      repeating-linear-gradient(
+        180deg,
+        rgba(0,0,0,0.25) 0px,
+        rgba(0,0,0,0.25) 4px,
+        transparent 4px,
+        transparent 32px
+      ),
+      /* planks */
+      repeating-linear-gradient(
+        180deg,
+        #8b4b34 0px,
+        #8b4b34 32px,
+        #7c422e 32px,
+        #7c422e 64px
+      );
+    background-color: #7f4630 !important; /* fallback */
+}
+
+.wood-panel h1,
+.wood-panel h2,
+.wood-panel h3,
+.wood-panel p,
+.wood-panel label,
+.wood-panel span { color: #c8836b !important; }
+
+/* Ensure key KPI values use beige as well */
+#stat-total-value,
+#stat-cash { color: #c8836b !important; }
+
+/* Utility class to force beige text */
+.beige-text { color: #c8836b !important; }
+
+/* Lighten only disclaimer and section headings outside signs */
+#intro-overlay p,
+#intro-overlay .text-gray-700,
+#intro-overlay .text-gray-500,
+#intro-overlay .font-semibold { color: #e6e6e6 !important; }
+
+.section-heading { color: #e6e6e6 !important; }
+
+/* Pixel icon helper for inline images */
+.pixel-icon { image-rendering: pixelated; display: inline-block; vertical-align: -0.15em; }
+
+/* Wood sign label colors: small labels and statuses */
+.wood-panel p.text-sm,
+.wood-panel .text-sm,
+.wood-panel .text-xs,
+.wood-panel #stat-clock-status { color: #ead9b5 !important; }
+
+.pixelify .rounded-lg,
+.pixelify .rounded-2xl,
+.pixelify .rounded-xl,
+.pixelify .rounded-md {
+    border-radius: 0 !important;
+}
+
+.pixelify .shadow-sm,
+.pixelify .shadow,
+.pixelify .shadow-lg {
+    box-shadow: var(--pixel) var(--pixel) 0 #0a2f1d !important;
+}
+
+.pixel-btn,
+.pixelify button {
+    font-family: var(--font-pixel);
+    border: var(--pixel) solid var(--btn-blue-border) !important;
+    border-radius: 0 !important;
+    background: var(--btn-blue) !important;
+    color: #fff !important;
+    box-shadow: 0 var(--pixel) 0 var(--btn-blue-border) !important;
+    transform: translateY(0);
+}
+.pixel-btn:hover,
+.pixelify button:hover {
+    background: var(--btn-blue-hover) !important;
+}
+.pixel-btn:active,
+.pixelify button:active {
+    transform: translateY(var(--pixel));
+    box-shadow: 0 0 0 var(--btn-blue-border) !important;
+}
+
+.pixel-header {
+    background: rgba(31, 138, 81, 0.88); /* lighter transparent green (restored) */
+    border-bottom: var(--pixel) solid #0a2f1d;
+}
+
+/* Drop shadow on banner text */
+.pixel-header .pixel-logo,
+.pixel-header p,
+.pixel-header [id^="header-"] {
+    filter: drop-shadow(var(--pixel) var(--pixel) 0 #0a2f1d);
+}
+
+/* Drop shadow for section headings like Shorted Seeds, Recent Activity */
+.section-heading {
+    filter: drop-shadow(var(--pixel) var(--pixel) 0 #0a2f1d);
+}
+.pixel-header span.text-3xl { display: none; }
+
+/* Floating translucent banner behind the logo */
+.logo-banner {
+    display: inline-block;
+    padding: 0; /* rely on header spacing */
+    margin: 0;
+    background: transparent; /* no glass effect */
+    border: none;
+    box-shadow: none;
+}
+
+#pixel-landscape {
+    position: relative;
+    width: 100%;
+    height: 220px;
+    background: linear-gradient(#2ba45f, #1f8a51);
+    overflow: hidden;
+}
+#pixel-landscape svg { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
 
 .plant-card {
     transition: transform 0.2s, box-shadow 0.2s;
@@ -97,6 +286,13 @@ h1, h2, h3, h4 {
 
 .modal-backdrop {
     backdrop-filter: blur(4px);
+}
+
+/* Pixel styling for intro overlay */
+#intro-overlay .max-w-2xl {
+    border: var(--pixel) solid #0a2f1d;
+    border-radius: 0 !important;
+    box-shadow: var(--pixel) var(--pixel) 0 #0a2f1d;
 }
 
 .garden-grid {

@@ -8,17 +8,17 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Press+Start+2P&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./styles.css">
 </head>
-<body class="bg-gradient-to-br from-green-50 to-emerald-100 min-h-screen">
+<body class="pixel-bg min-h-screen pixelify">
 
   <!-- Intro / Disclaimer Overlay -->
   <div id="intro-overlay" class="fixed inset-0 bg-white z-50 flex items-center justify-center px-4 py-8 transition-opacity duration-500">
     <div class="max-w-2xl w-full bg-white border border-emerald-200 shadow-xl rounded-2xl p-8 space-y-6">
       <div class="flex flex-col items-center text-center space-y-3">
-        <span class="text-6xl">🌱</span>
-        <h1 class="text-4xl font-display font-bold text-emerald-700">STALK Market</h1>
+        
+        <h1 class="text-3xl sm:text-4xl pixel-logo select-none">STALK MARKET</h1>
       </div>
       <div class="space-y-4 text-sm text-gray-700">
         <p class="font-semibold">Disclaimer: This simulator is for educational purposes only. No real money is involved.</p>
@@ -46,39 +46,88 @@
     </div>
   </div>
   <!-- Header -->
-  <header class="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
+  <header class="sticky top-0 z-50 pixel-header">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-16">
         <div class="flex items-center space-x-3">
-          <span class="text-3xl">🌱</span>
-          <h1 class="text-2xl font-display font-bold text-green-700">STALK Market</h1>
+          <div class="logo-banner">
+            <h1 class="text-3xl sm:text-4xl pixel-logo select-none">STALK MARKET</h1>
+          </div>
         </div>
         <div class="flex items-center space-x-6">
           <div class="text-right">
-            <p class="text-sm text-gray-500">Available Cash</p>
-            <p class="text-xl font-mono font-semibold text-green-600" id="header-cash">$10,000.00</p>
+            <p class="text-sm text-white">Available Cash</p>
+            <p class="text-xl font-mono font-semibold text-white" id="header-cash">$10,000.00</p>
           </div>
           <div class="text-right">
-            <p class="text-sm text-gray-500">Portfolio Value</p>
-            <p class="text-xl font-mono font-semibold text-gray-900" id="header-portfolio-value">$10,000.00</p>
+            <p class="text-sm text-white">Portfolio Value</p>
+            <p class="text-xl font-mono font-semibold text-white" id="header-portfolio-value">$10,000.00</p>
           </div>
         </div>
       </div>
     </div>
   </header>
 
+  <div id="pixel-landscape" aria-hidden="true">
+    <svg viewBox="0 0 1200 220" preserveAspectRatio="none" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="120" width="1200" height="100" fill="#167a43"/>
+      <rect x="0" y="130" width="1200" height="100" fill="#0f6a38"/>
+      <g fill="#0a2f1d" transform="translate(8,8)">
+        <rect x="120" y="110" width="120" height="40"/>
+        <rect x="240" y="95" width="16" height="55"/>
+        <rect x="260" y="95" width="16" height="55"/>
+        <rect x="280" y="95" width="16" height="55"/>
+        <rect x="300" y="95" width="16" height="55"/>
+        <rect x="480" y="85" width="140" height="65"/>
+        <rect x="520" y="65" width="60" height="20"/>
+        <rect x="740" y="100" width="100" height="50"/>
+        <polygon points="760,100 790,70 820,100"/>
+        <rect x="920" y="100" width="18" height="50"/>
+        <rect x="950" y="100" width="18" height="50"/>
+        <rect x="980" y="100" width="18" height="50"/>
+      </g>
+      <g fill="#134e32">
+        <rect x="120" y="110" width="120" height="40"/>
+        <rect x="240" y="95" width="16" height="55"/>
+        <rect x="260" y="95" width="16" height="55"/>
+        <rect x="280" y="95" width="16" height="55"/>
+        <rect x="300" y="95" width="16" height="55"/>
+        <rect x="480" y="85" width="140" height="65"/>
+        <rect x="520" y="65" width="60" height="20"/>
+        <rect x="740" y="100" width="100" height="50"/>
+        <polygon points="760,100 790,70 820,100"/>
+        <rect x="920" y="100" width="18" height="50"/>
+        <rect x="950" y="100" width="18" height="50"/>
+        <rect x="980" y="100" width="18" height="50"/>
+      </g>
+    </svg>
+  </div>
+
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-    <!-- Macro Card + Season Controls -->
-    <section class="mb-8">
+    <!-- Top KPIs: Total Value + Cash Available -->
+    <section class="mb-4">
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-          <h3 class="text-xl font-display font-semibold mb-2">🌤️ Macro Weather (FRED)</h3>
+        <div class="bg-white p-8 shadow-sm border border-gray-200 wood-panel pixel-panel">
+          <p class="text-lg mb-2">Total Value</p>
+          <p class="text-4xl font-mono font-semibold" id="stat-total-value">$10,000.00</p>
+        </div>
+        <div class="bg-white p-8 shadow-sm border border-gray-200 wood-panel pixel-panel">
+          <p class="text-lg mb-2">Cash Available</p>
+          <p class="text-4xl font-mono font-semibold" id="stat-cash">$10,000.00</p>
+        </div>
+      </div>
+    </section>
+    <!-- Macro Card + Season Controls -->
+    <section class="mb-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200 wood-panel pixel-panel">
+          <h3 class="text-xl font-display font-semibold mb-2 beige-text">Macro Weather (FRED)</h3>
           <div id="macro-card" class="text-sm text-gray-700 space-y-1">
             <p>Loading macro…</p>
           </div>
         </div>
-        <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-          <h3 class="text-xl font-display font-semibold mb-2">🗓️ Season Controls</h3>
+        <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200 wood-panel pixel-panel">
+          <h3 class="text-xl font-display font-semibold mb-2 beige-text">Season Controls</h3>
           <div class="space-y-2">
             <div class="flex items-center space-x-3">
               <button id="btn-new-season" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">Start New Season</button>
@@ -95,28 +144,20 @@
     </section>
 
     <!-- Stats Grid -->
-    <section class="mb-10">
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-        <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-          <p class="text-sm text-gray-500 mb-1">Total Value</p>
-          <p class="text-2xl font-mono font-semibold text-gray-900" id="stat-total-value">$10,000.00</p>
-        </div>
-        <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+    <section class="mb-4">
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+        <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200 wood-panel pixel-panel">
           <p class="text-sm text-gray-500 mb-1">Plants Owned</p>
           <p class="text-2xl font-mono font-semibold text-gray-900" id="stat-plants-owned">0</p>
         </div>
-        <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+        <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200 wood-panel pixel-panel">
           <p class="text-sm text-gray-500 mb-1">Today's Growth</p>
           <p class="text-2xl font-mono font-semibold" id="stat-today-growth">+$0.00</p>
         </div>
-        <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+        <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200 wood-panel pixel-panel">
           <p class="text-sm text-gray-500 mb-1">Market Day</p>
           <p class="text-2xl font-mono font-semibold text-gray-900" id="stat-current-step">Day —</p>
           <p class="text-xs text-gray-500" id="stat-clock-status">Paused</p>
-        </div>
-        <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-          <p class="text-sm text-gray-500 mb-1">Cash Available</p>
-          <p class="text-2xl font-mono font-semibold text-green-600" id="stat-cash">$10,000.00</p>
         </div>
       </div>
     </section>
@@ -124,7 +165,7 @@
     <!-- Market Section -->
     <section class="mb-12">
       <div class="flex items-center justify-between mb-4">
-        <h3 class="text-2xl font-display font-semibold text-gray-900">Market Garden 🌻</h3>
+        <h3 class="text-2xl font-display font-semibold text-gray-900 section-heading">Market Garden</h3>
         <button id="btn-mc" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Peek Risk (Monte Carlo)</button>
       </div>
       <div id="plant-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"></div>
@@ -132,22 +173,22 @@
 
     <!-- Garden Simulation -->
     <section class="mb-12">
-      <h3 class="text-2xl font-display font-semibold text-gray-900 mb-6">Interactive Garden 🌱</h3>
+      <h3 class="text-2xl font-display font-semibold text-gray-900 mb-6 section-heading">Interactive Garden</h3>
       <div id="garden-grid" class="garden-grid"></div>
     </section>
 
     <!-- Shorted Seeds Section -->
     <section class="mb-12">
       <div class="flex items-center justify-between mb-4">
-        <h3 class="text-2xl font-display font-semibold text-gray-900">Shorted Seeds 🌪️</h3>
+        <h3 class="text-2xl font-display font-semibold text-gray-900 section-heading">Shorted Seeds</h3>
       </div>
       <div id="short-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"></div>
     </section>
 
     <!-- Transactions Section -->
     <section>
-      <h3 class="text-2xl font-display font-semibold text-gray-900 mb-6">Recent Activity 📝</h3>
-      <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+      <h3 class="text-2xl font-display font-semibold text-gray-900 mb-6 section-heading">Recent Activity</h3>
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden wood-panel pixel-panel">
         <div id="transactions-list">
           <div class="p-8 text-center text-gray-500">
             <p>No transactions yet.</p>
@@ -259,3 +300,9 @@
   <script src="./app.js"></script>
 </body>
 </html>
+
+
+
+
+
+

@@ -1,3 +1,4 @@
+from google import genai
 
 """
 FarmFinance — FastAPI backend (main.py)
