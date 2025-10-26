@@ -14,13 +14,13 @@
 <body class="pixel-bg min-h-screen pixelify">
 
   <!-- Intro / Disclaimer Overlay -->
-  <div id="intro-overlay" class="fixed inset-0 bg-white z-50 flex items-center justify-center px-4 py-8 transition-opacity duration-500">
-    <div class="max-w-2xl w-full bg-white border border-emerald-200 shadow-xl rounded-2xl p-8 space-y-6">
+  <div id="intro-overlay" class="fixed inset-0 overlay-bg z-50 flex items-center justify-center px-4 py-8 transition-opacity duration-500">
+    <div class="max-w-2xl w-full wood-panel welcome-panel pixel-panel space-y-6">
       <div class="flex flex-col items-center text-center space-y-3">
-        
+
         <h1 class="text-3xl sm:text-4xl pixel-logo select-none">STALK MARKET</h1>
       </div>
-      <div class="space-y-4 text-sm text-gray-900">
+      <div class="space-y-4 text-sm text-white/90">
         <p class="font-semibold">Disclaimer: This simulator is for educational purposes only. No real money is involved.</p>
         <p>
           Welcome to the STALK Market educational simulator. Prices, macro context, and outcomes in this experience are entirely fictional and crafted for learning. Nothing here should be treated as investment advice or as guidance for real-world trades.
@@ -30,17 +30,17 @@
         </p>
       </div>
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <button id="edu-mode-button" class="flex-1 bg-gray-200 text-gray-800 px-4 py-3 rounded-lg font-semibold hover:bg-gray-300 transition">
+        <button id="edu-mode-button" class="flex-1 wood-button">
           Educational Mode: OFF
         </button>
-        <button id="start-button" class="flex-1 bg-emerald-600 text-white px-4 py-3 rounded-lg font-semibold hover:bg-emerald-700 transition">
+        <button id="start-button" class="flex-1 wood-button">
           Launch Market
         </button>
       </div>
-      <p class="text-xs text-gray-500 text-center">
+      <p class="text-xs text-white/70 text-center">
         Educational Mode turns on the effect of your portfolio diversification on the behavior of the market.
       </p>
-      <p class="text-xs text-gray-500 text-center">
+      <p class="text-xs text-white/70 text-center">
         Press “Launch Market” to begin. You acknowledge that all scenarios are simulated and for educational use only.
       </p>
     </div>
@@ -269,7 +269,6 @@
   <script src="./app.js"></script>
 </body>
 </html>
-
 
 
 

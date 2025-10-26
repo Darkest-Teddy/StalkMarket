@@ -540,10 +540,10 @@ async function ensureFutureSteps(){
 
 async function advanceTick(manual = false){
   if(!state.seasonId) return false;
-  if(state.currentStep >= state.maxStep){
+  if(state.currentStep >= state.maxStep+100){
     await ensureFutureSteps();
   }
-  if(state.currentStep >= state.maxStep){
+  if(state.currentStep >= state.maxStep+100){
     if(!state.timelineComplete){
       toast('Season timeline exhausted. Start a new season to keep growing.');
       state.timelineComplete = true;
