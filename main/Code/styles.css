@@ -108,9 +108,8 @@ h1, h2, h3, h4 {
 .garden-column {
     display: flex;
     flex-direction: column;
-    background-image: url('../Tiles/tdfarmtiles_grass.png');
-    background-size: cover;
-    background-position: center;
+    background-image: none;
+    background-color: #ffffff;
     border: 1px solid rgba(16, 185, 129, 0.25);
     border-radius: 16px;
     padding: 12px;
@@ -150,6 +149,7 @@ h1, h2, h3, h4 {
     position: relative;
     height: 82px;
     border-radius: 12px;
+    background-color: #ffffff;
     background-size: cover;
     background-position: center;
     display: flex;
@@ -175,4 +175,9 @@ h1, h2, h3, h4 {
     height: 64px;
     object-fit: contain;
     filter: drop-shadow(0 6px 10px rgba(0,0,0,0.15));
+}
+
+/* Ensure plots/charts render on a white background */
+canvas {
+    background-color: #ffffff;
 }

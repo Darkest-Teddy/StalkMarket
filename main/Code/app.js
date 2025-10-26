@@ -759,7 +759,8 @@ function ensureGardenSprite(cid, idx){
 function createGardenPlot(sprite, stage){
   const plot = document.createElement('div');
   plot.className = 'garden-plot';
-  plot.style.backgroundImage = `url("${TILE_BASE}/tdfarmtiles_dirt.png")`;
+  // Use a clean white tile background (no texture)
+  plot.style.backgroundImage = 'none';
   if(sprite != null && stage != null){
     const img = document.createElement('img');
     img.src = `${SPRITE_BASE}/${sprite}_${stage}.png`;
