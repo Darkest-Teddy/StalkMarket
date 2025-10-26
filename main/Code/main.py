@@ -1,12 +1,16 @@
+# from google import genai
+
 """
 FarmFinance — FastAPI backend (main.py)
 Includes: FRED macro integration, event engine, simulation, forecast, monte carlo,
 risk fitting, season prices endpoint, and report.
 """
-from __future__ import annotations
-
-from google import genai
+# from __future__ import annotations
+from stock_llm import StockLLM 
 import os, math, time, random, copy
+import torch
+import torch.nn as nn
+from transformers import GPT2Config, GPT2Model
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 import numpy as np
@@ -39,8 +43,15 @@ def seasonal_multiplier(t: int, T: int, amplitude: float, phase: float = 0.0) ->
     import math as _m
     return amplitude * _m.sin(2 * _m.pi * (t / max(T, 1)) + phase)
 
+
+model = StockLLM()
+model.load_state_dict(torch.load("model.pt"))
+model.eval()
+
+
 def step_price(P: float, mu: float, sigma: float, dt: float, seasonality_t: float,
                lam: float = 0.0, mu_j: float = 0.0, sig_j: float = 0.0) -> float:
+    # --- Original stochastic component ---
     Z = np.random.normal()
     log_ret = (mu - 0.5 * sigma**2) * dt + sigma * (dt**0.5) * Z
     log_ret += seasonality_t * dt
@@ -48,8 +59,37 @@ def step_price(P: float, mu: float, sigma: float, dt: float, seasonality_t: floa
         jump_count = np.random.poisson(lam * dt)
         if jump_count > 0:
             log_ret += np.random.normal(mu_j, sig_j) * jump_count
-    Pn = P * math.exp(log_ret)
-    return max(Pn, EPS)
+    P_stochastic = P * math.exp(log_ret)
+
+    # --- Behavioral adjustment ---
+    # Damp volatility if the user is risky
+    compute_risk_score = lambda: random.uniform(0.0, 1.0)  # Placeholder for actual risk score computation
+    risk_score = compute_risk_score()  # ∈ [0.0, 1.0]
+    alpha = 0.9  # weight for stochastic vs AI prediction
+    ai_input = torch.tensor([[P, mu, sigma, dt, seasonality_t,
+                                lam, mu_j, sig_j, risk_score]], dtype=torch.float32)
+    vol_factor = 1.0 - 0.5 * risk_score  # reduces fluctuations when risk_score high
+    P_adjusted = P + (P_stochastic - P) * vol_factor
+    ai_pred = None
+    try:
+        with torch.no_grad():
+            ai_output = model(ai_input).numpy().flatten()
+    except IndexError as e:
+        print("AI input shape:", ai_input.shape)
+        print("AI input max value:", ai_input.max())
+        raise e
+
+    ai_pred = ( 0.98 + float(ai_output[0])) * P
+    # --- AI prediction ---
+    if ai_pred is not None:
+        # Combine AI prediction and stochastic+behavioral
+        P_final =  ai_pred * (1 - alpha) + P_adjusted * alpha
+        # print(f"AI Prediction: {ai_pred}, Stochastic Adjusted: {P_adjusted}")
+    else:
+        P_final = P_adjusted
+        # print(f"Stochastic Adjusted Price: {P_adjusted}")
+
+    return max(P_final, EPS)
 
 # ---------- FRED helpers ----------
 def _fred():
@@ -121,6 +161,34 @@ def compute_macro_context(start: str = "2024-01-01", end: str = "2024-12-31") ->
     except Exception as exc:
         print("[WARN] compute_macro_context fallback:", exc)
         return fallback
+    
+def compute_risk_score(portfolio, market):
+    weights = np.array(list(portfolio.values()))
+    hhi = np.sum(weights**2)
+
+    vol = np.std([market[c]['volatility'] for c in portfolio])
+
+    leverage = portfolio.get('leverage', 1.0)
+
+    macro_factor = 1.2 if market.get('recession', False) else 1.0
+
+    raw_score = 0.5*hhi + 0.3*vol + 0.2*leverage
+    risk_score = np.clip(raw_score * macro_factor, 0.0, 1.0)
+    return risk_score
+
+
+def behavioral_adjustment(risk_score: float, macro: dict) -> dict:
+    """
+    Adjust macroeconomic variables based on user risk tolerance.
+    risk_score ∈ [-1.0, +1.0]:
+      -1.0 = highly risk-averse (lower returns, lower vol)
+      +1.0 = risk-seeking (higher returns, higher vol)
+    """
+    adj = macro.copy()
+    adj["inflation_ann"] *= (1 + 0.2 * risk_score)  # higher inflation for risk seekers
+    adj["vol_mult"] *= (1 + 0.3 * risk_score)       # amplify volatility
+    adj["rf_rate_ann"] *= (1 - 0.1 * risk_score)    # risk-seekers rely less on risk-free returns
+    return adj
 
 # ---------- Storage ----------
 class Storage:
