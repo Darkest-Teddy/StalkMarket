@@ -63,8 +63,8 @@ const GARDEN_SPRITE_OVERRIDES = {
   truffle: 'parsnip',
 };
 const GARDEN_SPRITE_POOL = ['wheat','pumpkin','tomato','potato','carrot','radish','beet','jalapeno','califlower'];
-const MAX_GARDEN_COLUMNS = 8;
-const BASE_GARDEN_ROWS = 4;
+const MAX_GARDEN_COLUMNS = 8; // 8 columns horizontally
+const BASE_GARDEN_ROWS = 1;   // 1 row (8 tiles total)
 const SPRITE_BASE = '../Objects';
 const TILE_BASE = '../Tiles';
 const MIN_HISTORY_POINTS = 20;
@@ -323,18 +323,18 @@ function renderEventPopups(){
     .sort((a,b)=> (b.endStep - a.endStep))
     .forEach(ev=>{
       const el = document.createElement('div');
-      el.className = 'bg-white/95 border border-emerald-200 shadow-lg rounded-lg p-4 space-y-2 pointer-events-auto';
+      el.className = 'event-banner wood-panel pixel-panel pixel-thin pointer-events-auto p-4 space-y-3';
       const name = ev.name || titleize(ev.type);
       const remaining = Math.max(0, ev.endStep - now);
       const affects = (ev.affected || []).length ? ev.affected.join(', ') : 'All crops';
       el.innerHTML = `
-        <div class="flex items-center justify-between">
-          <span class="font-semibold text-green-800">${name}</span>
-          <span class="text-xs font-mono text-gray-500">Day ${ev.ts}</span>
+        <div class="flex items-center justify-between gap-4">
+          <span class="font-semibold beige-text">${name}</span>
+          <span class="text-xs font-mono beige-text opacity-80">Day ${ev.ts}</span>
         </div>
-        <p class="text-xs text-gray-600">${ev.note || 'Seasonal conditions in effect.'}</p>
-        <p class="text-xs text-gray-500">Affects: ${affects}</p>
-        <p class="text-xs text-emerald-700 font-semibold">Expires in ${remaining} day${remaining === 1 ? '' : 's'}</p>
+        <p class="text-xs beige-text opacity-90">${ev.note || 'Seasonal conditions in effect.'}</p>
+        <p class="text-xs beige-text opacity-80">Affects: ${affects}</p>
+        <p class="text-xs font-semibold beige-text event-banner__expires">Expires in ${remaining} day${remaining === 1 ? '' : 's'}</p>
       `;
       container.appendChild(el);
     });
@@ -633,23 +633,23 @@ function renderMarket(){
       positionHtml += `<p class="text-xs ${basisClassShort}">Short ${shortQty} @ ${fmt(shortBasis)} (${(deltaShort*100).toFixed(1)}%)</p>`;
     }
     const card = document.createElement('div');
-    card.className = 'plant-card bg-white rounded-lg p-6 shadow-sm border border-gray-200 fade-in';
+    card.className = 'plant-card wood-panel pixel-panel pixel-thin p-6 fade-in';
     card.innerHTML = `
-      <div class="flex items-start justify-between">
-        <div>
-          <div class="mb-2 flex justify-center">
+      <div class="flex items-start justify-between gap-6">
+        <div class="plant-card-details">
+          <div class="mb-2 flex justify-start">
             <img class="market-card-image" src="${SPRITE_BASE}/${ensureGardenSprite(cid, idx)}_0.png" alt="${meta.name} seed">
           </div>
-          <h4 class="text-lg font-semibold">${meta.name}</h4>
-          <p class="text-sm text-gray-500">${meta.tagline}</p>
+          <h4 class="text-lg font-semibold beige-text">${meta.name}</h4>
+          <p class="text-sm beige-text opacity-80">${meta.tagline}</p>
           ${positionHtml}
         </div>
-        <div class="text-right">
-          <div class="text-2xl font-mono font-semibold">${fmt(last)}</div>
+        <div class="text-right price-display">
+          <div class="text-2xl font-mono font-semibold beige-text">${fmt(last)}</div>
           <div class="${color} text-sm">${pct(change)}</div>
         </div>
       </div>
-      <div class="mt-4">
+      <div class="mt-auto pt-4">
         <button class="w-full bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700" data-crop="${cid}">Trade</button>
       </div>
     `;
@@ -663,13 +663,13 @@ function renderShorts(){
   if(!grid) return;
   const active = state.crops.filter(cid => (state.shorts[cid] || 0) > 0);
   if(!active.length){
-    grid.innerHTML = `<div class="col-span-full bg-white border border-dashed border-gray-300 rounded-lg p-6 text-center text-gray-500">
+    grid.innerHTML = `<div class="col-span-full shorted-empty wood-panel pixel-panel pixel-thin p-6 text-center beige-text opacity-80">
       No borrowed seeds. Use Borrow & Short to profit from falling prices.
     </div>`;
     return;
   }
   grid.innerHTML = '';
-  active.forEach(cid => {
+  active.forEach((cid, idx) => {
     const qty = state.shorts[cid] || 0;
     const basis = state.shortBasis[cid] || 0;
     const arr = state.prices[cid] || [];
@@ -679,22 +679,25 @@ function renderShorts(){
     const pnl = qty * (basis - last);
     const pnlClass = pnl >= 0 ? 'text-green-600' : 'text-red-600';
     const meta = cropMeta(cid);
+    const sprite = ensureGardenSprite(cid, idx);
     const card = document.createElement('div');
-    card.className = 'plant-card bg-white rounded-lg p-6 shadow-sm border border-gray-200 fade-in';
+    card.className = 'plant-card wood-panel pixel-panel pixel-thin p-6 fade-in';
     card.innerHTML = `
-      <div class="flex items-start justify-between">
-        <div>
-          <div class="plant-emoji mb-2">${meta.emoji}</div>
-          <h4 class="text-lg font-semibold">${meta.name}</h4>
-          <p class="text-sm text-gray-500">Borrowed ${qty} @ ${fmt(basis)}</p>
+      <div class="flex items-start justify-between gap-6">
+        <div class="plant-card-details">
+          <div class="short-card-thumb mb-2">
+            <img class="market-card-image" src="${SPRITE_BASE}/${sprite}_4.png" alt="${meta.name} sprite">
+          </div>
+          <h4 class="text-lg font-semibold beige-text">${meta.name}</h4>
+          <p class="text-sm beige-text opacity-80">Borrowed ${qty} @ ${fmt(basis)}</p>
           <p class="text-sm font-mono ${pnlClass}">${fmtSigned(pnl)} unrealized</p>
         </div>
-        <div class="text-right">
-          <div class="text-2xl font-mono font-semibold">${fmt(last)}</div>
+        <div class="text-right price-display">
+          <div class="text-2xl font-mono font-semibold beige-text">${fmt(last)}</div>
           <div class="${change>0?'price-up':(change<0?'price-down':'price-neutral')} text-sm">${pct(change)}</div>
         </div>
       </div>
-      <div class="mt-4">
+      <div class="mt-auto pt-4">
         <button class="w-full bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700" data-crop="${cid}">Manage</button>
       </div>
     `;
@@ -759,9 +762,14 @@ function ensureGardenSprite(cid, idx){
 function createGardenPlot(sprite, stage){
   const plot = document.createElement('div');
   plot.className = 'garden-plot';
-  // Use a clean white tile background (no texture)
-  plot.style.backgroundImage = 'none';
-  if(sprite != null && stage != null){
+
+  const tile = document.createElement('img');
+  tile.src = `${TILE_BASE}/dirt.png`;
+  tile.alt = 'dirt tile';
+  tile.className = 'garden-tile';
+  plot.appendChild(tile);
+
+  if(sprite && stage !== null && stage !== undefined){
     const img = document.createElement('img');
     img.src = `${SPRITE_BASE}/${sprite}_${stage}.png`;
     img.alt = sprite;
@@ -770,6 +778,7 @@ function createGardenPlot(sprite, stage){
   } else {
     plot.classList.add('garden-plot--empty');
   }
+
   return plot;
 }
 
@@ -777,49 +786,35 @@ function renderGarden(){
   const grid = document.getElementById('garden-grid');
   if(!grid) return;
   grid.innerHTML = '';
+
   const crops = state.crops.slice(0, MAX_GARDEN_COLUMNS);
-  for(let i=0; i<MAX_GARDEN_COLUMNS; i++){
-    const cid = crops[i];
+  for(let i = 0; i < MAX_GARDEN_COLUMNS; i++){
     const column = document.createElement('div');
     column.className = 'garden-column';
-    const header = document.createElement('div');
-    header.className = 'garden-column-header';
-    if(cid){
-      const meta = cropMeta(cid);
-      const qty = Math.max(0, state.holdings[cid]||0);
-      header.innerHTML = `<span class="garden-name">${meta.name}</span><span class="garden-qty">${qty} seeds</span>`;
-    } else {
-      header.innerHTML = `<span class="garden-name text-gray-400">Empty Plot</span>`;
-    }
-    column.appendChild(header);
 
-    const plots = document.createElement('div');
-    plots.className = 'garden-plots';
-    const plotData = [];
+    const cid = crops[i];
     if(cid){
-      const qty = Math.max(0, state.holdings[cid]||0);
       const sprite = ensureGardenSprite(cid, i);
-      const fullCount = Math.floor(qty / 20);
-      const remainder = qty % 20;
-      for(let j=0;j<fullCount;j++){
-        plotData.push({sprite, stage: 4});
+      const qty = Math.max(0, state.holdings[cid] || 0);
+      const tileCount = Math.max(1, Math.ceil(qty / 20));
+
+      for(let t = 0; t < tileCount; t++){
+        const remaining = Math.max(0, qty - t * 20);
+        const portion = Math.min(remaining, 20);
+        let stage = null;
+        let tileSprite = null;
+        if(portion > 0){
+          const ratio = portion / 20;
+          stage = Math.ceil(ratio * 4);
+          stage = Math.max(1, Math.min(4, stage));
+          tileSprite = sprite;
+        }
+        column.appendChild(createGardenPlot(tileSprite, stage));
       }
-      if(remainder > 0){
-        const stage = Math.min(3, Math.max(0, Math.floor((remainder / 20) * 4)));
-        plotData.push({sprite, stage});
-      }
+    } else {
+      column.appendChild(createGardenPlot(null, null));
     }
-    while(plotData.length < BASE_GARDEN_ROWS){
-      plotData.push(null);
-    }
-    plotData.forEach(data => {
-      if(data){
-        plots.appendChild(createGardenPlot(data.sprite, data.stage));
-      }else{
-        plots.appendChild(createGardenPlot(null, null));
-      }
-    });
-    column.appendChild(plots);
+
     grid.appendChild(column);
   }
 }
@@ -931,8 +926,24 @@ async function buildModalChart(cid){
       ]
     },
     options: {
-      plugins: { legend: { display: true } },
-      scales: { y: { beginAtZero: false } }
+      plugins: {
+        legend: {
+          display: true,
+          labels: {
+            color: '#ead9b5',
+            font: {
+              family: 'Press Start 2P, Inter, sans-serif',
+              size: 10
+            },
+            boxWidth: 12,
+            padding: 12
+          }
+        }
+      },
+      scales: {
+        y: { beginAtZero: false, ticks: { color: '#ead9b5' }, grid: { color: 'rgba(234, 217, 181, 0.25)' } },
+        x: { ticks: { color: '#ead9b5' }, grid: { color: 'rgba(234, 217, 181, 0.15)' } }
+      }
     }
   });
 }
@@ -1024,7 +1035,7 @@ function renderTxns(){
     return;
   }
   list.innerHTML = state.txns.slice(0,10).map(x=>{
-    let color = 'text-gray-700';
+    let color = 'text-gray-900';
     if(x.type === 'BUY') color = 'text-green-700';
     else if(x.type === 'SELL') color = 'text-red-700';
     else if(x.type === 'SHORT') color = 'text-yellow-600';

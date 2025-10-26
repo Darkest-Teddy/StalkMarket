@@ -6,6 +6,7 @@
     --pixel: 4px;
     --pixel-2: 8px;
     --outline: 2px;
+    --outline-thin: 1px;
     /* Button theme: dark blue */
     --btn-blue: #153e75;          /* dark blue base */
     --btn-blue-hover: #123764;    /* darker on hover */
@@ -123,9 +124,11 @@ h1, h2, h3, h4 {
 /* Utility class to force beige text */
 .beige-text { color: #c8836b !important; }
 
+/* Light green inner box inside panels */
+
 /* Lighten only disclaimer and section headings outside signs */
 #intro-overlay p,
-#intro-overlay .text-gray-700,
+#intro-overlay .text-gray-900,
 #intro-overlay .text-gray-500,
 #intro-overlay .font-semibold { color: #e6e6e6 !important; }
 
@@ -204,19 +207,37 @@ h1, h2, h3, h4 {
     position: relative;
     width: 100%;
     height: 220px;
-    background: linear-gradient(#2ba45f, #1f8a51);
+    background-image: url('../Tiles/Header.png');
+    background-size: cover;
+    background-position: center calc(80% - 40px);
+    background-repeat: no-repeat;
+    image-rendering: pixelated;
     overflow: hidden;
+    border-bottom: var(--pixel) solid #0a2f1d;
 }
-#pixel-landscape svg { width: 100%; height: 100%; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+/* Muted green shader overlay for the header art */
+#pixel-landscape::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(17, 72, 44, 0.45), rgba(9, 38, 24, 0.65));
+    pointer-events: none;
+}
 
 .plant-card {
     transition: transform 0.2s, box-shadow 0.2s;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    justify-content: space-between;
+    position: relative;
 }
 
 .plant-card:hover {
     transform: scale(1.05);
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
 }
+
 
 .plant-emoji {
     font-size: 4rem;
@@ -274,22 +295,162 @@ h1, h2, h3, h4 {
     box-shadow: var(--pixel) var(--pixel) 0 #0a2f1d;
 }
 
+/* Make overlay background match site green */
+#intro-overlay {
+    background: #1f8a51 !important; /* same as .pixel-bg base */
+}
+
+/* Hide header banner while disclaimer overlay is visible */
+#intro-overlay:not(.hidden) ~ header.pixel-header {
+    display: none;
+}
+
+/* Center all disclaimer text content */
+#intro-overlay p,
+#intro-overlay h1,
+#intro-overlay .text-xs,
+#intro-overlay .space-y-4 { text-align: center !important; }
+
+.no-border,
+.no-border * {
+    text-shadow: none !important;
+}
+
+.pixel-thin,
+.pixel-thin * {
+    text-shadow:
+      calc(var(--outline-thin) * -1) 0 #000,
+      var(--outline-thin) 0 #000,
+      0 calc(var(--outline-thin) * -1) #000,
+      0 var(--outline-thin) #000,
+      calc(var(--outline-thin) * -1) calc(var(--outline-thin) * -1) #000,
+      var(--outline-thin) calc(var(--outline-thin) * -1) #000,
+      calc(var(--outline-thin) * -1) var(--outline-thin) #000,
+      var(--outline-thin) var(--outline-thin) #000;
+}
+
+.event-banner {
+    border-radius: 0 !important;
+    border: var(--pixel) solid #2a2726 !important;
+    box-shadow: var(--pixel) var(--pixel) 0 #0a2f1d !important;
+}
+.event-banner,
+.event-banner * {
+    text-shadow:
+      calc(var(--outline-thin) * -1) 0 #000 !important,
+      var(--outline-thin) 0 #000 !important,
+      0 calc(var(--outline-thin) * -1) #000 !important,
+      0 var(--outline-thin) #000 !important;
+}
+.event-banner__expires {
+    color: #f0f4bc !important;
+}
+.shorted-panel {
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+.shorted-panel #short-cards {
+    width: 100%;
+}
+.shorted-title {
+    letter-spacing: 1px;
+}
+.short-card-thumb {
+    display: flex;
+    justify-content: flex-start;
+}
+.shorted-empty {
+    font-family: var(--font-pixel);
+}
+.trade-modal-panel {
+    position: relative;
+    border-radius: 0 !important;
+}
+.trade-modal-body {
+    background: rgba(20, 64, 44, 0.25);
+    border: var(--outline-thin) solid rgba(10, 47, 29, 0.6);
+}
+.trade-modal-title {
+    letter-spacing: 1px;
+}
+.trade-price #modal-price-change {
+    text-shadow:
+      calc(var(--outline-thin) * -1) 0 #000,
+      var(--outline-thin) 0 #000,
+      0 calc(var(--outline-thin) * -1) #000,
+      0 var(--outline-thin) #000 !important;
+}
+.trade-subpanel {
+    background: rgba(15, 58, 36, 0.38);
+    border: var(--outline-thin) solid rgba(10, 47, 29, 0.75);
+    padding: 1.25rem;
+    border-radius: 0 !important;
+}
+.trade-subpanel canvas {
+    background: rgba(255, 255, 255, 0.2);
+    border: var(--outline-thin) solid rgba(0, 0, 0, 0.35);
+}
+.trade-input {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: var(--pixel) solid #2a2726;
+    background: rgba(244, 233, 200, 0.85);
+    color: #1a1a1a;
+    font-family: var(--font-pixel);
+    border-radius: 0 !important;
+    outline: none;
+}
+.trade-input:focus {
+    box-shadow: 0 0 0 var(--pixel) rgba(12, 74, 46, 0.6);
+}
+.trade-divider {
+    border-top: var(--outline-thin) solid rgba(234, 217, 181, 0.4);
+}
+.trade-close svg {
+    stroke: #ead9b5;
+}
+.trade-close:hover svg {
+    stroke: #ffffff;
+}
+.toast-panel {
+    padding: 1rem 1.25rem;
+    min-width: 240px;
+    display: flex;
+    align-items: center;
+    box-shadow: var(--pixel) var(--pixel) 0 #0a2f1d !important;
+}
+.toast-message {
+    margin: 0;
+    text-shadow:
+      calc(var(--outline-thin) * -1) 0 #000,
+      var(--outline-thin) 0 #000,
+      0 calc(var(--outline-thin) * -1) #000,
+      0 var(--outline-thin) #000 !important;
+}
+#toast.hidden {
+    display: none;
+}
 .garden-grid {
     display: grid;
-    grid-template-columns: repeat(8, minmax(120px, 1fr));
-    gap: 1rem;
+    grid-template-columns: repeat(8, minmax(64px, 1fr));
+    gap: 8px;
+    align-items: start;
+}
+
+.garden-plot {
+    position: relative;
+    width: 100%;
+    display: inline-block;
 }
 
 .garden-column {
     display: flex;
     flex-direction: column;
-    background-image: none;
-    background-color: #ffffff;
-    border: 1px solid rgba(16, 185, 129, 0.25);
-    border-radius: 16px;
-    padding: 12px;
-    box-shadow: 0 6px 18px rgba(16, 95, 63, 0.08);
-    min-height: 320px;
+    gap: 6px;
+    background: transparent;
+    padding: 0;
 }
 
 .garden-column-header {
@@ -320,27 +481,28 @@ h1, h2, h3, h4 {
     justify-content: flex-start;
 }
 
-.garden-plot {
-    position: relative;
-    height: 82px;
-    border-radius: 12px;
-    background-color: #ffffff;
-    background-size: cover;
-    background-position: center;
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-    padding-bottom: 6px;
-    box-shadow: inset 0 -6px 12px rgba(0,0,0,0.12);
+/* Raw dirt tile image styling (preserve rough edges, responsive) */
+.garden-tile {
+    image-rendering: pixelated;
+    width: 100%;
+    height: auto;
+    display: block;
 }
 
-.garden-plot--empty { opacity: 0.35; }
-
 .garden-plant {
-    max-height: 72px;
-    width: auto;
-    object-fit: contain;
+    position: absolute;
+    left: 50%;
+    bottom: 10%;
+    transform: translateX(-50%);
+    width: 65%;
+    height: auto;
+    image-rendering: pixelated;
     filter: drop-shadow(0 4px 6px rgba(0,0,0,0.18));
+    pointer-events: none;
+}
+
+.garden-plot--empty {
+    opacity: 0.6;
 }
 
 .market-card-image {
@@ -348,6 +510,22 @@ h1, h2, h3, h4 {
     height: 64px;
     object-fit: contain;
     filter: drop-shadow(0 6px 10px rgba(0,0,0,0.15));
+}
+
+.price-display {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.25rem;
+    text-align: right;
+    min-width: 6.5rem;
+}
+.price-display .text-2xl {
+    line-height: 1.1;
+}
+
+.plant-card-details {
+    flex: 1;
 }
 
 /* Ensure plots/charts render on a white background */
