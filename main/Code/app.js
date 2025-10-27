@@ -35,22 +35,22 @@ const state = {
 
 const CROPS_META = {
   wheat: {
-    name: 'Golden Wheat',
+    name: 'Wealthy Wheat',
     emoji: '🌾',
     tagline: 'Steady bond-like staple',
   },
   corn: {
-    name: 'Sunrise Corn',
+    name: 'Pricey Pumpkin',
     emoji: '🌽',
     tagline: 'Blue-chip harvest with supply swings',
   },
   berries: {
-    name: 'Berry Patch',
+    name: 'Tangy Tomatos',
     emoji: '🫐',
     tagline: 'High-growth seasonal favorite',
   },
   truffle: {
-    name: 'Truffle Grove',
+    name: 'Traded Turnip',
     emoji: '🍄',
     tagline: 'Alt delicacy with rare windfalls',
   },
@@ -67,7 +67,63 @@ const MAX_GARDEN_COLUMNS = 8; // 8 columns horizontally
 const BASE_GARDEN_ROWS = 1;   // 1 row (8 tiles total)
 const SPRITE_BASE = '../Objects';
 const TILE_BASE = '../Tiles';
+const AUDIO_BASE = '../Objects';
 const MIN_HISTORY_POINTS = 20;
+
+const audioState = {
+  planting: null,
+  soundtrack: null,
+  unlocked: false,
+};
+
+function ensureAudio(){
+  if(!audioState.planting){
+    const planting = new Audio(`${AUDIO_BASE}/Planting.mp3`);
+    planting.preload = 'auto';
+    planting.volume = 0.6;
+    audioState.planting = planting;
+  }
+  if(!audioState.soundtrack){
+    const track = new Audio(`${AUDIO_BASE}/Soundtrack.mp3`);
+    track.preload = 'auto';
+    track.loop = true;
+    track.volume = 0.35;
+    audioState.soundtrack = track;
+  }
+}
+
+function unlockAudio(){
+  ensureAudio();
+  audioState.unlocked = true;
+  startSoundtrack();
+}
+
+function startSoundtrack(){
+  ensureAudio();
+  const track = audioState.soundtrack;
+  if(!track || !audioState.unlocked) return;
+  if(track.paused){
+    const playPromise = track.play();
+    if(playPromise && typeof playPromise.then === 'function'){
+      playPromise.catch(()=>{ /* ignored: user gesture required */ });
+    }
+  }
+}
+
+function playPlantingSound(){
+  ensureAudio();
+  const planting = audioState.planting;
+  if(!planting || !audioState.unlocked) return;
+  try{
+    planting.currentTime = 0;
+  }catch(err){
+    // Ignore seek errors
+  }
+  const playPromise = planting.play();
+  if(playPromise && typeof playPromise.then === 'function'){
+    playPromise.catch(()=>{ /* ignored */ });
+  }
+}
 
 // ---------- Utils ----------
 const fmt = (n) => '$' + (n || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
@@ -225,6 +281,7 @@ function setupIntroOverlay(){
         overlay.classList.add('opacity-0','pointer-events-none');
         setTimeout(()=> overlay.classList.add('hidden'), 400);
       }
+      unlockAudio();
       await newSeason();
     });
   }
@@ -424,6 +481,7 @@ async function newSeason() {
     initTimeline(history);
 
     renderMacro();
+    startSoundtrack();
     renderMarket();
     renderPortfolio();
     renderTxns();
@@ -970,6 +1028,7 @@ function executeBuy(){
   state.holdings[currentCrop] = newQty;
   state.costBasis[currentCrop] = newQty ? totalCost / newQty : 0;
   state.txns.unshift({t: Date.now(), type:'BUY', cid: currentCrop, qty, price});
+  playPlantingSound();
   renderPortfolio();
   renderTxns();
   updateTradeTotal();
@@ -990,6 +1049,7 @@ function executeSell(){
     state.costBasis[currentCrop] = 0;
   }
   state.txns.unshift({t: Date.now(), type:'SELL', cid: currentCrop, qty, price});
+  playPlantingSound();
   renderPortfolio();
   renderTxns();
   updateTradeTotal();
@@ -1009,6 +1069,7 @@ function executeShort(){
   state.shorts[currentCrop] = newQty;
   state.shortBasis[currentCrop] = newQty ? totalBorrow / newQty : 0;
   state.txns.unshift({t: Date.now(), type:'SHORT', cid: currentCrop, qty, price});
+  playPlantingSound();
   renderPortfolio();
   renderTxns();
   updateTradeTotal();
@@ -1030,6 +1091,7 @@ function executeCover(){
     state.shortBasis[currentCrop] = 0;
   }
   state.txns.unshift({t: Date.now(), type:'COVER', cid: currentCrop, qty, price});
+  playPlantingSound();
   renderPortfolio();
   renderTxns();
   updateTradeTotal();
