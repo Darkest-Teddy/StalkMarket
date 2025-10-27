@@ -1,3 +1,0 @@
-To run this, you need to run this line in terminal first:
-python -m uvicorn main:api --reload --host 0.0.0.0 --port 8000
-*from .../StalkMarket/main/Code folder
