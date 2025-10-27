@@ -309,6 +309,16 @@ function triggerEventPopup(ev){
   const end = ev.ts + duration;
   state.eventPopups = state.eventPopups.filter(x => !(x.type === ev.type && x.ts === ev.ts));
   state.eventPopups.push({...ev, endStep: end});
+  const effectKey = `${ev.type || ev.id || ''}:${ev.ts}`;
+  if(isRainEvent(ev) && shouldTriggerEffect('rain', effectKey)){
+    triggerRainEffect();
+  }
+  if(isSnowEvent(ev) && shouldTriggerEffect('snow', effectKey)){
+    triggerSnowEffect();
+  }
+  if(isBugEvent(ev) && shouldTriggerEffect('bug', effectKey)){
+    triggerBugEffect();
+  }
   renderEventPopups();
 }
 
@@ -666,6 +676,158 @@ function renderMarket(){
   });
 }
 
+function isRainEvent(ev){
+  if(!ev) return false;
+  const haystack = [
+    (ev.type || '').toString(),
+    (ev.name || '').toString(),
+    (ev.note || '').toString()
+  ].join(' ').toLowerCase();
+  return /\brain/.test(haystack);
+}
+
+function isSnowEvent(ev){
+  if(!ev) return false;
+  const haystack = [
+    (ev.type || '').toString(),
+    (ev.id || '').toString(),
+    (ev.name || '').toString(),
+    (ev.note || '').toString()
+  ].join(' ').toLowerCase();
+  return haystack.includes('snow') || haystack.includes('blizzard') || haystack.includes('bear_storm') || haystack.includes('stormy bear');
+}
+
+function isBugEvent(ev){
+  if(!ev) return false;
+  const haystack = [
+    (ev.type || '').toString(),
+    (ev.id || '').toString(),
+    (ev.name || '').toString(),
+    (ev.note || '').toString()
+  ].join(' ').toLowerCase();
+  return haystack.includes('bug') || haystack.includes('insect') || haystack.includes('pest') || haystack.includes('locust');
+}
+
+function shouldTriggerEffect(kind, key){
+  if(!key) return true;
+  if(lastEffectKey[kind] === key) return false;
+  lastEffectKey[kind] = key;
+  return true;
+}
+
+function runParticleEffect(kind, options, populate){
+  const { duration = 4000, waitForCompletion = false } = options || {};
+  const overlay = document.getElementById('particle-overlay');
+  if(!overlay) return;
+  if(typeof overlay._cleanup === 'function'){
+    overlay._cleanup(true);
+  }
+  overlay.innerHTML = '';
+  overlay.classList.remove('active','rain-mode','snow-mode','bug-mode');
+  overlay.classList.add('active', `${kind}-mode`);
+  let cleaned = false;
+  const cleanup = (force = false) => {
+    if(cleaned) return;
+    cleaned = true;
+    clearTimeout(particleTimer);
+    overlay.classList.remove('active','rain-mode','snow-mode','bug-mode');
+    if(!force){
+      overlay.innerHTML = '';
+    }else{
+      overlay.innerHTML = '';
+    }
+    overlay._cleanup = null;
+  };
+  overlay._cleanup = cleanup;
+  populate(overlay);
+  const particles = Array.from(overlay.children || []);
+  if(waitForCompletion && particles.length){
+    let remaining = particles.length;
+    const onEnd = (event) => {
+      event.target.removeEventListener('animationend', onEnd);
+      remaining -= 1;
+      if(remaining <= 0){
+        cleanup();
+      }
+    };
+    particles.forEach(el => el.addEventListener('animationend', onEnd));
+    clearTimeout(particleTimer);
+    particleTimer = setTimeout(() => cleanup(), duration);
+  } else {
+    clearTimeout(particleTimer);
+    particleTimer = setTimeout(() => cleanup(), duration);
+    if(waitForCompletion && particles.length === 0){
+      cleanup();
+    }
+  }
+}
+
+function triggerRainEffect(duration = 7600){
+  runParticleEffect('rain', { duration, waitForCompletion: true }, overlay => {
+    const dropCount = 120;
+    for(let i = 0; i < dropCount; i++){
+      const drop = document.createElement('span');
+      drop.className = 'raindrop';
+      const left = Math.random() * 100;
+      const width = 0.8 + Math.random() * 1.2;
+      const delay = Math.random() * 0.6;
+      const durationMs = 0.9 + Math.random() * 0.5 + 5;
+      const height = 24 + Math.random() * 32;
+      drop.style.left = `${left}vw`;
+      drop.style.height = `${height}px`;
+      drop.style.width = `${width}px`;
+      drop.style.animationDuration = `${durationMs}s`;
+      drop.style.animationDelay = `${delay}s`;
+      overlay.appendChild(drop);
+    }
+  });
+}
+
+function triggerSnowEffect(duration = 7800){
+  runParticleEffect('snow', { duration, waitForCompletion: true }, overlay => {
+    const flakeCount = 140;
+    for(let i = 0; i < flakeCount; i++){
+      const flake = document.createElement('span');
+      flake.className = 'snowflake';
+      const left = Math.random() * 100;
+      const delay = Math.random() * 0.8;
+      const durationMs = 1.8 + Math.random() * 1.4 + 5;
+      const drift = (Math.random() * 20 - 10).toFixed(2);
+      const size = 3 + Math.random() * 2;
+      flake.style.left = `${left}vw`;
+      flake.style.width = `${size}px`;
+      flake.style.height = `${size * 2}px`;
+      flake.style.animationDuration = `${durationMs}s`;
+      flake.style.animationDelay = `${delay}s`;
+      flake.style.setProperty('--drift', `${drift}vw`);
+      overlay.appendChild(flake);
+    }
+  });
+}
+
+function triggerBugEffect(duration = 7600){
+  runParticleEffect('bug', { duration, waitForCompletion: false }, overlay => {
+    const flyCount = 32;
+    for(let i = 0; i < flyCount; i++){
+      const fly = document.createElement('span');
+      fly.className = 'fly-dot';
+      const left = 5 + Math.random() * 90;
+      const top = 10 + Math.random() * 70;
+      const delay = Math.random() * 0.5;
+      const durationMs = 1.4 + Math.random() * 1.1 + 5;
+      const tx = (Math.random() * 140 - 70).toFixed(1);
+      const ty = (Math.random() * 120 - 60).toFixed(1);
+      fly.style.left = `${left}vw`;
+      fly.style.top = `${top}vh`;
+      fly.style.animationDuration = `${durationMs}s`;
+      fly.style.animationDelay = `${delay}s`;
+      fly.style.setProperty('--tx', `${tx}px`);
+      fly.style.setProperty('--ty', `${ty}px`);
+      overlay.appendChild(fly);
+    }
+  });
+}
+
 function renderShorts(){
   const grid = document.getElementById('short-cards');
   if(!grid) return;
@@ -832,6 +994,8 @@ function updateHeader(){ renderPortfolio(); }
 // ---------- Trade Modal ----------
 let modalChart = null;
 let currentCrop = null;
+let particleTimer = null;
+const lastEffectKey = { rain: null, snow: null, bug: null };
 
 function openTradeModal(cid){
   currentCrop = cid;

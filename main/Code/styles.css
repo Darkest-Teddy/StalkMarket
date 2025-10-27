@@ -520,6 +520,99 @@ h1, h2, h3, h4 {
 #toast.hidden {
     display: none;
 }
+.particle-overlay {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    z-index: 60;
+    pointer-events: none;
+}
+.particle-overlay.active {
+    opacity: 1;
+}
+.raindrop {
+    position: absolute;
+    top: -15vh;
+    width: 2px;
+    background: linear-gradient(to bottom, rgba(147, 197, 253, 0), rgba(56, 189, 248, 0.8));
+    opacity: 0.75;
+    border-radius: 999px;
+    animation-name: rain-fall;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+}
+@keyframes rain-fall {
+    0% {
+        transform: translate3d(0, -100vh, 0);
+        opacity: 0;
+    }
+    15% {
+        opacity: 0.9;
+    }
+    100% {
+        transform: translate3d(0, 120vh, 0);
+        opacity: 0;
+    }
+}
+.snowflake {
+    position: absolute;
+    top: -10vh;
+    width: 4px;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.85);
+    filter: blur(0.35px);
+    animation-name: snow-fall;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+}
+@keyframes snow-fall {
+    0% {
+        transform: translate3d(0, -100vh, 0);
+        opacity: 0;
+    }
+    15% {
+        opacity: 0.85;
+    }
+    100% {
+        transform: translate3d(var(--drift, 8vw), 120vh, 0);
+        opacity: 0;
+    }
+}
+.fly-dot {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.85);
+    opacity: 0;
+    animation-name: fly-loop;
+    animation-timing-function: ease-in-out;
+    animation-fill-mode: forwards;
+}
+@keyframes fly-loop {
+    0% {
+        opacity: 0;
+        transform: translate3d(0, 0, 0);
+    }
+    10% {
+        opacity: 1;
+    }
+    40% {
+        transform: translate3d(var(--tx, 20px), var(--ty, -20px), 0);
+    }
+    70% {
+        transform: translate3d(calc(var(--tx, 20px) * -0.4), calc(var(--ty, -20px) * 0.6), 0);
+    }
+    100% {
+        opacity: 0;
+        transform: translate3d(calc(var(--tx, 20px) * 0.1), calc(var(--ty, -20px) * -0.2), 0);
+    }
+}
 .garden-grid {
     display: grid;
     grid-template-columns: repeat(8, minmax(64px, 1fr));
