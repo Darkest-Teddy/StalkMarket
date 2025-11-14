@@ -65,9 +65,9 @@ const GARDEN_SPRITE_OVERRIDES = {
 const GARDEN_SPRITE_POOL = ['wheat','pumpkin','tomato','potato','carrot','radish','beet','jalapeno','califlower'];
 const MAX_GARDEN_COLUMNS = 8; // 8 columns horizontally
 const BASE_GARDEN_ROWS = 1;   // 1 row (8 tiles total)
-const SPRITE_BASE = '../public/images/Objects';
-const TILE_BASE = '../public/images/Tiles';
-const AUDIO_BASE = '../public/images/Objects';
+const SPRITE_BASE = './public/images/Objects';
+const TILE_BASE = './public/images/Tiles';
+const AUDIO_BASE = './public/images/Objects';
 const MIN_HISTORY_POINTS = 20;
 
 const audioState = {
