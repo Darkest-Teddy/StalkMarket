@@ -2,22 +2,22 @@
   "version": 2,
   "builds": [
     {
-      "src": "main/Code/**/*",
+      "src": "index.html",
       "use": "@vercel/static"
     }
   ],
   "routes": [
     {
       "src": "/public/(.*)",
-      "dest": "/main/Code/public/$1"
+      "dest": "/public/$1"
     },
     {
       "src": "/",
-      "dest": "/main/Code/index.html"
+      "dest": "/index.html"
     },
     {
       "src": "/(.*)",
-      "dest": "/main/Code/$1"
+      "dest": "/$1"
     }
   ]
 }
