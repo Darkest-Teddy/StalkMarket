@@ -700,16 +700,14 @@ def serve_index():
     return {"message": "Farm Finance API", "status": "online"}
 
 
+app.include_router(api_router, prefix="/api")
+
 @app.get("/{asset_path:path}", include_in_schema=False)
 def serve_public_asset(asset_path: str):
-    if asset_path.startswith("api/"):
-        raise HTTPException(404, "Not Found")
     file_path = _safe_public_path(asset_path)
     if file_path:
         return FileResponse(file_path)
     raise HTTPException(404, "Not Found")
-
-app.include_router(api_router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn
