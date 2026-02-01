@@ -300,8 +300,8 @@ class ReportResponse(BaseModel):
     macro: dict
 
 from fastapi.middleware.cors import CORSMiddleware
-api = FastAPI(title="FarmFinance API", version="0.3.0")
-__all__ = ["api"]
+app = FastAPI(title="FarmFinance API", version="0.3.0")
+__all__ = ["app"]
 
 # CORS (dev)
 api.add_middleware(
@@ -584,4 +584,4 @@ def demo_seed(season_id: str = "S1"):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:api", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
