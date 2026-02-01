@@ -2,6 +2,8 @@
 
 from server import api
 
+app = api
+
 __all__ = ["api"]
 
 
