@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, APIRouter
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 try:
@@ -365,6 +365,7 @@ class ReportResponse(BaseModel):
 from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(title="FarmFinance API", version="0.3.0")
 api = app  # alias expected by uvicorn entrypoint
+api_router = APIRouter()
 
 def _discover_public_root() -> Optional[Path]:
     local_dir = (Path(__file__).resolve().parent / "public").resolve()
@@ -387,7 +388,7 @@ PUBLIC_DIR = _discover_public_root()
 __all__ = ["app", "api"]
 
 # CORS (dev)
-api.add_middleware(
+app.add_middleware(
     CORSMiddleware,
     allow_origins=['*'],
     allow_credentials=True,
@@ -395,21 +396,21 @@ api.add_middleware(
     allow_headers=['*'],
 )
 
-@api.get("/health")
+@api_router.get("/health")
 def health(): return {"ok": True, "time": time.time()}
 
-@api.get("/macro")
+@api_router.get("/macro")
 def macro_snapshot():
     m = compute_macro_context(start="2024-01-01", end="2024-12-31")
     return {"ok": True, "macro": m}
 
-@api.get("/season/{season_id}/prices")
+@api_router.get("/season/{season_id}/prices")
 def get_prices(season_id: str):
     if season_id not in DB.prices:
         raise HTTPException(404, "season not found")
     return {"season_id": season_id, "prices": DB.prices[season_id], "events": DB.events.get(season_id, [])}
 
-@api.post("/season/{season_id}/advance")
+@api_router.post("/season/{season_id}/advance")
 def advance_season(season_id: str, req: AdvanceRequest):
     if season_id not in DB.prices:
         raise HTTPException(404, "season not found")
@@ -480,7 +481,7 @@ def advance_season(season_id: str, req: AdvanceRequest):
             new_prices.append(rec)
     return {"season_id": season_id, "prices": new_prices, "events": new_events}
 
-@api.post("/simulate", response_model=SimulateResponse)
+@api_router.post("/simulate", response_model=SimulateResponse)
 def simulate(req: SimulateRequest):
     np.random.seed(req.seed)
     season_id = req.season_id
@@ -524,7 +525,7 @@ def simulate(req: SimulateRequest):
             DB.prices[season_id].append({"ts": t, "crop_id": cid, "price": float(P[cid])})
     return SimulateResponse(season_id=season_id, prices=DB.prices[season_id], events=DB.events[season_id], macro=macro)
 
-@api.post("/forecast", response_model=ForecastResponse)
+@api_router.post("/forecast", response_model=ForecastResponse)
 def forecast(req: ForecastRequest):
     if req.season_id not in DB.prices:
         raise HTTPException(404, "season not found")
@@ -564,7 +565,7 @@ def forecast(req: ForecastRequest):
         forecasts[cid] = {"mean": mean_path, "p10": lo, "p90": hi}
     return ForecastResponse(season_id=req.season_id, horizon=req.horizon, forecasts=forecasts)
 
-@api.post("/montecarlo", response_model=MonteCarloResponse)
+@api_router.post("/montecarlo", response_model=MonteCarloResponse)
 def montecarlo(req: MonteCarloRequest):
     np.random.seed()
     idx = {cp.crop_id: i for i, cp in enumerate(req.crop_params)}
@@ -585,7 +586,7 @@ def montecarlo(req: MonteCarloRequest):
     es5 = float(losses[losses >= var5].mean()) if np.any(losses >= var5) else float(losses.mean())
     return MonteCarloResponse(percentiles={"p5,p25,p50,p75,p95": pcts}, var_es={"VaR_5": var5, "ES_5": es5})
 
-@api.post("/fit_risk", response_model=FitRiskResponse)
+@api_router.post("/fit_risk", response_model=FitRiskResponse)
 def fit_risk(req: FitRiskRequest):
     def U(w, g):
         return math.log(max(w, EPS)) if abs(g-1.0) < 1e-9 else ((max(w,EPS)**(1-g)-1)/(1-g))
@@ -604,7 +605,7 @@ def fit_risk(req: FitRiskRequest):
             if ll > best[0]: best = (ll, float(g), float(b))
     return FitRiskResponse(player_id=req.player_id, gamma=best[1], beta=best[2])
 
-@api.post("/report", response_model=ReportResponse)
+@api_router.post("/report", response_model=ReportResponse)
 def report(req: ReportRequest):
     if req.season_id not in DB.prices:
         raise HTTPException(404, "season not found")
@@ -654,11 +655,7 @@ def report(req: ReportRequest):
                           market_exposure=dict(alpha=alpha, beta=beta), behavior=dict(), tips=tips,
                           counterfactual=counterfactual, macro=macro)
 
-@api.get("/")
-def read_root():
-    return {"message": "Farm Finance API", "status": "online"}
-
-@api.post("/demo_seed")
+@api_router.post("/demo_seed")
 def demo_seed(season_id: str = "S1"):
     cps = [CropParams(crop_id=c["id"], mu=c["base_mu"], sigma=c["base_sigma"],
                       seasonality_strength=c["seas"], mean_revert_kappa=c["kappa"],
@@ -682,7 +679,7 @@ def _safe_public_path(relative: str) -> Optional[Path]:
     return candidate if candidate.is_file() else None
 
 
-@api.get("/", include_in_schema=False)
+@app.get("/", include_in_schema=False)
 def serve_index():
     index_path = _safe_public_path("index.html")
     if index_path:
@@ -690,12 +687,16 @@ def serve_index():
     return {"message": "Farm Finance API", "status": "online"}
 
 
-@api.get("/{asset_path:path}", include_in_schema=False)
+@app.get("/{asset_path:path}", include_in_schema=False)
 def serve_public_asset(asset_path: str):
+    if asset_path.startswith("api/"):
+        raise HTTPException(404, "Not Found")
     file_path = _safe_public_path(asset_path)
     if file_path:
         return FileResponse(file_path)
     raise HTTPException(404, "Not Found")
+
+app.include_router(api_router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn

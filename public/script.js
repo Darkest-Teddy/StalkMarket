@@ -3,7 +3,19 @@
  * State is client-side (localStorage) for hackathon simplicity.
  */
 
-const API = () => window.API_BASE || 'http://localhost:8000';
+const API = (() => {
+  const strip = (url) => (url || '').replace(/\/+$/, '');
+  const guessBase = () => {
+    if (typeof window !== 'undefined') {
+      if (window.API_BASE) return window.API_BASE;
+      const loc = window.location || {};
+      if (loc.origin && loc.origin !== 'null') return loc.origin;
+    }
+    return 'http://localhost:8000';
+  };
+  const base = strip(guessBase());
+  return () => `${base}/api`;
+})();
 
 // ---------- Global State ----------
 const state = {
