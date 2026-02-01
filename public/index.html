@@ -13,11 +13,13 @@
   <script>
     (function setStaticBase(){
       if (window.STALK_PUBLIC_BASE) return;
-      var path = window.location && window.location.pathname ? window.location.pathname : "";
+      var loc = window.location || {};
+      var path = loc.pathname || "";
+      var hasOrigin = typeof loc.origin === "string" && loc.origin !== "null";
       if (path.indexOf("/main/Code/") !== -1) {
-        window.STALK_PUBLIC_BASE = "../public/";
-      } else if (path.indexOf("/main/public/") !== -1) {
-        window.STALK_PUBLIC_BASE = "/main/public/";
+        window.STALK_PUBLIC_BASE = "../../public/";
+      } else if (path.indexOf("/main/public/") !== -1 || path.indexOf("/public/") !== -1) {
+        window.STALK_PUBLIC_BASE = hasOrigin ? "/public/" : "./";
       } else {
         window.STALK_PUBLIC_BASE = "./";
       }

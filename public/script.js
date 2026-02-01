@@ -75,14 +75,16 @@ const STATIC_BASE_URL = (() => {
       console.warn('[assets] Invalid override for STALK_PUBLIC_BASE:', override, err);
     }
   }
-  const path = (window.location && window.location.pathname) || '';
+  const loc = window.location || {};
+  const path = loc.pathname || '';
+  const hasOrigin = typeof loc.origin === 'string' && loc.origin !== 'null';
   if (path.indexOf('/main/Code/') !== -1) {
-    return new URL('../public/', window.location.href);
+    return new URL('../../public/', loc.href);
   }
-  if (path.indexOf('/main/public/') !== -1 && window.location && window.location.origin && window.location.origin !== 'null') {
-    return new URL('/main/public/', window.location.origin);
+  if ((path.indexOf('/main/public/') !== -1 || path.indexOf('/public/') !== -1) && hasOrigin) {
+    return new URL('/public/', loc.origin);
   }
-  return new URL('./', window.location.href);
+  return new URL('./', loc.href);
 })();
 
 const stripTrailingSlash = (url) => url.replace(/\/+$/, '');
