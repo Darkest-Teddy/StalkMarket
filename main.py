@@ -11,11 +11,7 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass
 import numpy as np
 
-from pathlib import Path
-
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
@@ -637,11 +633,8 @@ def report(req: ReportRequest):
                           market_exposure=dict(alpha=alpha, beta=beta), behavior=dict(), tips=tips,
                           counterfactual=counterfactual, macro=macro)
 
-@api.get("/", response_class=HTMLResponse)
+@api.get("/")
 def read_root():
-    index_path = Path("public/index.html")
-    if index_path.is_file():
-        return FileResponse(index_path)
     return {"message": "Farm Finance API", "status": "online"}
 
 @api.post("/demo_seed")
@@ -652,9 +645,6 @@ def demo_seed(season_id: str = "S1"):
     res = simulate(SimulateRequest(season_id=season_id, seed=123, steps=52, crop_params=cps,
                                    start_prices={c["id"]: 100.0 for c in DEFAULT_CROPS}))
     return {"ok": True, "season_id": season_id, "n_prices": len(res.prices), "macro": res.macro}
-
-if os.path.isdir("public"):
-    api.mount("/", StaticFiles(directory="public", html=True), name="public")
 
 if __name__ == "__main__":
     import uvicorn
