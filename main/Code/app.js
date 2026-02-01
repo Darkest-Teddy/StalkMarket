@@ -68,15 +68,34 @@ const BASE_GARDEN_ROWS = 1;   // 1 row (8 tiles total)
 
 const STATIC_BASE_URL = (() => {
   const override = window.STALK_PUBLIC_BASE || window.FF_PUBLIC_BASE;
-  const fallback = new URL('../public/', window.location.href);
-  const base = override ? new URL(override, window.location.href) : fallback;
-  return base;
+  if (override) {
+    try {
+      return new URL(override, window.location.href);
+    } catch (err) {
+      console.warn('[assets] Invalid override for STALK_PUBLIC_BASE:', override, err);
+    }
+  }
+  const path = (window.location && window.location.pathname) || '';
+  if (path.indexOf('/main/Code/') !== -1) {
+    return new URL('../public/', window.location.href);
+  }
+  if (window.location && window.location.origin && window.location.origin !== 'null') {
+    return new URL('/main/public/', window.location.origin);
+  }
+  return new URL('../public/', window.location.href);
 })();
 
 const stripTrailingSlash = (url) => url.replace(/\/+$/, '');
 const SPRITE_BASE = stripTrailingSlash(new URL('images/Objects/', STATIC_BASE_URL).href);
 const TILE_BASE = stripTrailingSlash(new URL('images/Tiles/', STATIC_BASE_URL).href);
 const AUDIO_BASE = stripTrailingSlash(new URL('images/Objects/', STATIC_BASE_URL).href);
+const syncCssAssetVars = () => {
+  const root = document.documentElement;
+  if (!root) return;
+  root.style.setProperty('--tiles-bg-url', `url(${TILE_BASE}/Background.png)`);
+  root.style.setProperty('--tiles-header-url', `url(${TILE_BASE}/Header.png)`);
+};
+syncCssAssetVars();
 const MIN_HISTORY_POINTS = 20;
 
 const audioState = {

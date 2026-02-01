@@ -20,10 +20,10 @@ Our platform is designed for **accessibility and fun**. Users track their portfo
 
 ## Running the Project
 
-### Step 1. Navigate to the Backend Folder
-Go to the main backend directory:
+### Step 1. Navigate to the Project Root
+Go to the repository root:
 ```bash
-cd .../StalkMarket/main/Code
+cd .../StalkMarket
 ```
 ### Step 2. Run the Python File
 ```bash

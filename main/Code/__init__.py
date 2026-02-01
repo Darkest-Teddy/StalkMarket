@@ -1,5 +1,10 @@
-# Expose the FastAPI application at package level for uvicorn
-from .Code.main import api  # noqa: F401
+"""Compatibility package exposing the FastAPI app from :mod:`main`.
+
+Keeps older imports (``from main.Code import api``) working even after moving
+the backend entrypoint to the repository root.
+"""
+
+from .main import api
 
 __all__ = ["api"]
 
