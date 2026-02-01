@@ -692,6 +692,7 @@ def _safe_public_path(relative: str) -> Optional[Path]:
 
 
 @app.get("/", include_in_schema=False)
+@app.head("/", include_in_schema=False)
 def serve_index():
     index_path = _safe_public_path("index.html")
     if index_path:
