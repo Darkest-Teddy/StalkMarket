@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
@@ -359,6 +360,10 @@ class ReportResponse(BaseModel):
 from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(title="FarmFinance API", version="0.3.0")
 api = app  # alias expected by uvicorn entrypoint
+
+if os.path.isdir("public"):
+    api.mount("/assets", StaticFiles(directory="public"), name="public")
+
 __all__ = ["app", "api"]
 
 # CORS (dev)
@@ -637,6 +642,9 @@ def demo_seed(season_id: str = "S1"):
     res = simulate(SimulateRequest(season_id=season_id, seed=123, steps=52, crop_params=cps,
                                    start_prices={c["id"]: 100.0 for c in DEFAULT_CROPS}))
     return {"ok": True, "season_id": season_id, "n_prices": len(res.prices), "macro": res.macro}
+
+if os.path.isdir("public"):
+    api.mount("/", StaticFiles(directory="public", html=True), name="public")
 
 if __name__ == "__main__":
     import uvicorn
