@@ -68,7 +68,8 @@ const BASE_GARDEN_ROWS = 1;   // 1 row (8 tiles total)
 
 const STATIC_BASE_URL = (() => {
   const override = window.STALK_PUBLIC_BASE || window.FF_PUBLIC_BASE;
-  const base = override ? new URL(override, window.location.href) : new URL('./public/', window.location.href);
+  const fallback = new URL('../public/', window.location.href);
+  const base = override ? new URL(override, window.location.href) : fallback;
   return base;
 })();
 
