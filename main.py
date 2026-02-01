@@ -19,13 +19,6 @@ try:
 except Exception:
     pd = None
 
-# Optional ETS
-try:
-    from statsmodels.tsa.holtwinters import ExponentialSmoothing
-    HAS_HW = True
-except Exception:
-    HAS_HW = False
-
 # FRED integration
 try:
     from fredapi import Fred
@@ -34,6 +27,71 @@ except Exception:
     HAS_FRED = False
 
 EPS = 1e-12
+
+HW_ALPHA_GRID = (0.2, 0.4, 0.6, 0.8)
+HW_BETA_GRID = (0.05, 0.15, 0.3)
+HW_GAMMA_GRID = (0.2, 0.4, 0.6, 0.8)
+
+
+def _initial_hw_components(series: np.ndarray, period: int) -> tuple[float, float, np.ndarray]:
+    n = len(series)
+    if period <= 1 or n < 2 * period:
+        raise ValueError("need at least two periods for Holt-Winters initialization")
+    n_seasons = n // period
+    if n_seasons < 2:
+        raise ValueError("insufficient complete seasons")
+    season_avgs = [series[i*period:(i+1)*period].mean() for i in range(n_seasons)]
+    seasonals = np.zeros(period, dtype=float)
+    for i in range(period):
+        vals = [series[j*period + i] - season_avgs[j] for j in range(n_seasons)]
+        seasonals[i] = float(np.mean(vals))
+    trend = np.mean([(series[i + period] - series[i]) / period for i in range(period)])
+    level = float(series[:period].mean())
+    return level, trend, seasonals
+
+
+def holt_winters_additive(series: np.ndarray, period: int, horizon: int) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Lightweight additive Holt-Winters smoothing (level + trend + season) with a
+    coarse grid-search over smoothing parameters. Returns (fitted, forecast).
+    """
+    data = np.asarray(series, dtype=float)
+    if horizon <= 0:
+        raise ValueError("horizon must be positive")
+    level0, trend0, seasonals0 = _initial_hw_components(data, period)
+    best = None
+
+    def run(alpha: float, beta: float, gamma: float):
+        level = level0
+        trend = trend0
+        seasonals = seasonals0.copy()
+        fitted = np.zeros_like(data)
+        for i, actual in enumerate(data):
+            season = seasonals[i % period]
+            last_level = level
+            level = alpha * (actual - season) + (1 - alpha) * (level + trend)
+            trend = beta * (level - last_level) + (1 - beta) * trend
+            seasonals[i % period] = gamma * (actual - level) + (1 - gamma) * season
+            fitted[i] = level + trend + seasonals[i % period]
+        forecast = np.zeros(horizon, dtype=float)
+        for h in range(1, horizon + 1):
+            idx = (len(data) + h - 1) % period
+            forecast[h - 1] = level + h * trend + seasonals[idx]
+        err = float(np.mean((data - fitted) ** 2))
+        return err, fitted, forecast
+
+    for alpha in HW_ALPHA_GRID:
+        for beta in HW_BETA_GRID:
+            for gamma in HW_GAMMA_GRID:
+                err, fitted, forecast = run(alpha, beta, gamma)
+                if not np.isfinite(err):
+                    continue
+                if best is None or err < best[0]:
+                    best = (err, fitted, forecast)
+
+    if best is None:
+        raise RuntimeError("Holt-Winters optimisation failed")
+    return best[1], best[2]
 
 def seasonal_multiplier(t: int, T: int, amplitude: float, phase: float = 0.0) -> float:
     import math as _m
@@ -460,17 +518,15 @@ def forecast(req: ForecastRequest):
             lo = (np.array(mean_path) - 1.28*std).clip(min=EPS).tolist()
             hi = (np.array(mean_path) + 1.28*std).tolist()
             forecasts[cid] = {"mean": mean_path, "p10": lo, "p90": hi}; continue
-        if HAS_HW and pd is not None:
+        slen = max(6, min(52, len(series)//2))
+        if len(series) >= 2 * slen:
             try:
-                s = pd.Series(series)
-                slen = max(6, min(52, len(series)//2))
-                model = ExponentialSmoothing(s, trend="add", seasonal="add", seasonal_periods=slen).fit(optimized=True)
-                pred = model.forecast(req.horizon)
-                resid = s - model.fittedvalues
-                sd = np.std(resid.values) if len(resid) > 1 else np.std(s.values)
-                mean_path = pred.values.clip(min=EPS).tolist()
-                lo = (pred.values - 1.28*sd).clip(min=EPS).tolist()
-                hi = (pred.values + 1.28*sd).clip(min=EPS).tolist()
+                fitted, pred = holt_winters_additive(series, slen, req.horizon)
+                resid = series - fitted
+                sd = float(np.std(resid) if len(resid) > 1 else np.std(series))
+                mean_path = pred.clip(min=EPS).tolist()
+                lo = (pred - 1.28*sd).clip(min=EPS).tolist()
+                hi = (pred + 1.28*sd).clip(min=EPS).tolist()
                 forecasts[cid] = {"mean": mean_path, "p10": lo, "p90": hi}; continue
             except Exception:
                 pass
