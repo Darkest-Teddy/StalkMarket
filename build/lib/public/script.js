@@ -1,0 +1,1351 @@
+/* STALK Market Frontend – connects to FarmFinance FastAPI
+ * Gameplay loop: plan -> simulate (season) -> trade -> Monte Carlo peek -> report
+ * State is client-side (localStorage) for hackathon simplicity.
+ */
+
+const API = () => window.API_BASE || 'http://localhost:8000';
+
+// ---------- Global State ----------
+const state = {
+  seasonId: null,
+  prices: {},     // {cropId: [prices...]}
+  crops: [],      // cropIds
+  events: [],
+  macro: {},
+  cash: 10000,
+  holdings: {},   // {cropId: qty}
+  shorts: {},     // {cropId: qty}
+  txns: [],
+  charts: {},
+  fullHistory: {},   // complete price history per crop
+  currentStep: 0,
+  maxStep: 0,
+  tickIntervalMs: 10000,
+  timerId: null,
+  timerRunning: false,
+  costBasis: {},
+  shortBasis: {},
+  extending: false,
+  timelineComplete: false,
+  eventPopups: [],
+  educationalMode: false,
+  starting: false,
+  gardenSprites: {},
+};
+
+const CROPS_META = {
+  wheat: {
+    name: 'Wealthy Wheat',
+    emoji: '🌾',
+    tagline: 'Steady bond-like staple',
+  },
+  corn: {
+    name: 'Pricey Pumpkin',
+    emoji: '🌽',
+    tagline: 'Blue-chip harvest with supply swings',
+  },
+  berries: {
+    name: 'Tangy Tomatos',
+    emoji: '🫐',
+    tagline: 'High-growth seasonal favorite',
+  },
+  truffle: {
+    name: 'Traded Turnip',
+    emoji: '🍄',
+    tagline: 'Alt delicacy with rare windfalls',
+  },
+};
+
+const GARDEN_SPRITE_OVERRIDES = {
+  wheat: 'wheat',
+  corn: 'pumpkin',
+  berries: 'tomato',
+  truffle: 'parsnip',
+};
+const GARDEN_SPRITE_POOL = ['wheat','pumpkin','tomato','potato','carrot','radish','beet','jalapeno','califlower'];
+const MAX_GARDEN_COLUMNS = 8; // 8 columns horizontally
+const BASE_GARDEN_ROWS = 1;   // 1 row (8 tiles total)
+
+const STATIC_BASE_URL = (() => {
+  const override = window.STALK_PUBLIC_BASE || window.FF_PUBLIC_BASE;
+  if (override) {
+    try {
+      return new URL(override, window.location.href);
+    } catch (err) {
+      console.warn('[assets] Invalid override for STALK_PUBLIC_BASE:', override, err);
+    }
+  }
+  const loc = window.location || {};
+  const path = loc.pathname || '';
+  const hasOrigin = typeof loc.origin === 'string' && loc.origin !== 'null';
+  if (path.indexOf('/main/Code/') !== -1) {
+    return new URL('../../public/', loc.href);
+  }
+  if ((path.indexOf('/main/public/') !== -1 || path.indexOf('/public/') !== -1) && hasOrigin) {
+    return new URL('/public/', loc.origin);
+  }
+  return new URL('./', loc.href);
+})();
+
+const stripTrailingSlash = (url) => url.replace(/\/+$/, '');
+const SPRITE_BASE = stripTrailingSlash(new URL('images/Objects/', STATIC_BASE_URL).href);
+const TILE_BASE = stripTrailingSlash(new URL('images/Tiles/', STATIC_BASE_URL).href);
+const AUDIO_BASE = stripTrailingSlash(new URL('images/Objects/', STATIC_BASE_URL).href);
+const syncCssAssetVars = () => {
+  const root = document.documentElement;
+  if (!root) return;
+  root.style.setProperty('--tiles-bg-url', `url(${TILE_BASE}/Background.png)`);
+  root.style.setProperty('--tiles-header-url', `url(${TILE_BASE}/Header.png)`);
+};
+syncCssAssetVars();
+const MIN_HISTORY_POINTS = 20;
+
+const audioState = {
+  planting: null,
+  soundtrack: null,
+  unlocked: false,
+};
+
+function ensureAudio(){
+  if(!audioState.planting){
+    const planting = new Audio(`${AUDIO_BASE}/Planting.mp3`);
+    planting.preload = 'auto';
+    planting.volume = 0.6;
+    audioState.planting = planting;
+  }
+  if(!audioState.soundtrack){
+    const track = new Audio(`${AUDIO_BASE}/Soundtrack.mp3`);
+    track.preload = 'auto';
+    track.loop = true;
+    track.volume = 0.35;
+    audioState.soundtrack = track;
+  }
+}
+
+function unlockAudio(){
+  ensureAudio();
+  audioState.unlocked = true;
+  startSoundtrack();
+}
+
+function startSoundtrack(){
+  ensureAudio();
+  const track = audioState.soundtrack;
+  if(!track || !audioState.unlocked) return;
+  if(track.paused){
+    const playPromise = track.play();
+    if(playPromise && typeof playPromise.then === 'function'){
+      playPromise.catch(()=>{ /* ignored: user gesture required */ });
+    }
+  }
+}
+
+function playPlantingSound(){
+  ensureAudio();
+  const planting = audioState.planting;
+  if(!planting || !audioState.unlocked) return;
+  try{
+    planting.currentTime = 0;
+  }catch(err){
+    // Ignore seek errors
+  }
+  const playPromise = planting.play();
+  if(playPromise && typeof playPromise.then === 'function'){
+    playPromise.catch(()=>{ /* ignored */ });
+  }
+}
+
+// ---------- Utils ----------
+const fmt = (n) => '$' + (n || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const fmtSigned = (n) => {
+  const sign = n >= 0 ? '+' : '-';
+  const mag = Math.abs(n).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  return `${sign}$${mag}`;
+};
+const pct = (x) => ((x >= 0 ? '+' : '') + (100 * x).toFixed(2) + '%');
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  document.getElementById('toast-message').textContent = msg;
+  t.classList.remove('hidden');
+  setTimeout(() => t.classList.add('hidden'), 2600);
+}
+
+function sum(arr){ return arr.reduce((a,b)=>a+b,0); }
+
+function extendHistoryBackward(priceMap, minPoints = MIN_HISTORY_POINTS){
+  const out = {};
+  Object.entries(priceMap).forEach(([cid, raw]) => {
+    const series = Array.isArray(raw) ? [...raw] : [];
+    if(!series.length){ series.push(100); }
+    let prev = series[0];
+    while(series.length < minPoints){
+      const drift = 0.994 + Math.random() * 0.008;
+      const noise = 1 + (Math.random() - 0.5) * 0.015;
+      prev = Math.max(1, prev * drift * noise);
+      series.unshift(prev);
+    }
+    out[cid] = series;
+  });
+  return out;
+}
+
+// Estimate mu/sigma from history (simple, weekly)
+function estimateParams(prices){
+  const rets = [];
+  for(let i=1;i<prices.length;i++){
+    rets.push((prices[i]-prices[i-1])/(prices[i-1]||1));
+  }
+  const m = rets.length ? rets.reduce((a,b)=>a+b,0)/rets.length : 0.001;
+  const v = rets.length ? Math.sqrt(rets.map(x=> (x-m)**2).reduce((a,b)=>a+b,0)/Math.max(1,rets.length-1)) : 0.02;
+  return {mu: m, sigma: v, seasonality_strength: 0.2};
+}
+
+// Convert portfolio to weights (by market value)
+function portfolioWeights() {
+  const latest = latestPrices();
+  let total = 0;
+  const w = {};
+  for (const cid of state.crops) {
+    const qtyLong = state.holdings[cid] || 0;
+    const qtyShort = state.shorts[cid] || 0;
+    const p = latest[cid] || 0;
+    const exposure = qtyLong * p - qtyShort * p;
+    total += Math.abs(exposure);
+    w[cid] = exposure;
+  }
+  if(total > 0){
+    for (const cid of state.crops) {
+      w[cid] = w[cid] / total;
+    }
+  } else {
+    for (const cid of state.crops) {
+      w[cid] = 0;
+    }
+  }
+  return w;
+}
+
+function latestPrices(){
+  const last = {};
+  for(const cid of state.crops) {
+    const arr = state.prices[cid] || [];
+    last[cid] = arr.length ? arr[arr.length-1] : 0;
+  }
+  return last;
+}
+
+function titleize(id){
+  if(!id) return '';
+  return id.replace(/[_-]/g, ' ').replace(/\b\w/g, (c)=>c.toUpperCase());
+}
+
+function cropMeta(cid){
+  const meta = CROPS_META[cid] || {};
+  return {
+    name: meta.name || titleize(cid),
+    emoji: meta.emoji || '🪴',
+    tagline: meta.tagline || 'Versatile seasonal grower',
+  };
+}
+
+function computeDiversificationHHI(){
+  const prices = latestPrices();
+  const weights = {};
+  let total = 0;
+  for(const cid of state.crops){
+    const netQty = (state.holdings[cid] || 0) - (state.shorts[cid] || 0);
+    const exposure = Math.abs(netQty * (prices[cid] || 0));
+    if(exposure > 0){
+      weights[cid] = exposure;
+      total += exposure;
+    }
+  }
+  if(total <= 0){
+    return 0.0;
+  }
+  let hhi = 0;
+  for(const cid of Object.keys(weights)){
+    const share = weights[cid] / total;
+    hhi += share * share;
+  }
+  return Math.min(1, Math.max(0, hhi));
+}
+
+function applyEducationalMode(enabled){
+  state.educationalMode = enabled;
+  localStorage.setItem('STALK_EDU_MODE', enabled ? '1' : '0');
+  const btn = document.getElementById('edu-mode-button');
+  if(btn){
+    if(enabled){
+      btn.textContent = 'Educational Mode: ON';
+      btn.classList.remove('bg-gray-200','text-gray-800');
+      btn.classList.add('bg-emerald-100','text-emerald-700');
+    }else{
+      btn.textContent = 'Educational Mode: OFF';
+      btn.classList.remove('bg-emerald-100','text-emerald-700');
+      btn.classList.add('bg-gray-200','text-gray-800');
+    }
+  }
+}
+
+function setupIntroOverlay(){
+  const overlay = document.getElementById('intro-overlay');
+  const startBtn = document.getElementById('start-button');
+  const eduBtn = document.getElementById('edu-mode-button');
+  const saved = localStorage.getItem('STALK_EDU_MODE') === '1';
+  applyEducationalMode(saved);
+
+  if(eduBtn){
+    eduBtn.addEventListener('click', ()=>{
+      applyEducationalMode(!state.educationalMode);
+      if(!overlay || overlay.classList.contains('hidden')){
+        toast(state.educationalMode ? 'Educational Mode active. Diversification pressure OFF.' : 'Educational Mode OFF. Diversification pressure ON.');
+      }
+    });
+  }
+
+  if(startBtn){
+    startBtn.addEventListener('click', async ()=>{
+      if(overlay){
+        overlay.classList.add('opacity-0','pointer-events-none');
+        setTimeout(()=> overlay.classList.add('hidden'), 400);
+      }
+      unlockAudio();
+      await newSeason();
+    });
+  }
+
+  renderGarden();
+}
+
+function resetTimeline(){
+  if(state.timerId){
+    clearTimeout(state.timerId);
+    state.timerId = null;
+  }
+  state.timerRunning = false;
+  state.currentStep = 0;
+  state.maxStep = 0;
+  state.timelineComplete = false;
+}
+
+function initTimeline(prices){
+  resetTimeline();
+  state.fullHistory = {};
+  state.prices = {};
+  let max = 0;
+  Object.entries(prices).forEach(([cid, series])=>{
+    const arr = Array.isArray(series) ? [...series] : [];
+    state.fullHistory[cid] = arr;
+    state.prices[cid] = arr.length ? [...arr] : [];
+    if(arr.length){
+      max = Math.max(max, arr.length - 1);
+    }
+  });
+  state.currentStep = max;
+  state.maxStep = max;
+  state.timelineComplete = false;
+  renderClock();
+}
+
+function renderClock(){
+  const stepEl = document.getElementById('stat-current-step');
+  if(stepEl){
+    stepEl.textContent = state.seasonId ? `Day ${state.currentStep}` : 'Day —';
+  }
+  const statusEl = document.getElementById('stat-clock-status');
+  if(statusEl){
+    let label = 'Paused';
+    let cls = 'text-gray-500';
+    if(state.timelineComplete){
+      label = 'Complete';
+      cls = 'text-amber-600';
+    }else if(state.timerRunning){
+      label = 'Running';
+      cls = 'text-green-600';
+    }
+    statusEl.textContent = label;
+    statusEl.className = `text-xs font-semibold ${cls}`;
+  }
+  const btn = document.getElementById('btn-toggle-clock');
+  if(btn){
+    if(state.timelineComplete){
+      btn.textContent = 'Start New Season';
+    }else{
+      btn.textContent = state.timerRunning ? 'Pause Clock' : 'Resume Clock';
+    }
+  }
+}
+
+function hydrateEventPopups(){
+  const now = state.currentStep;
+  state.eventPopups = [];
+  (state.events || []).forEach(ev=>{
+    const duration = ev.duration || 1;
+    const end = ev.ts + duration;
+    if(now >= ev.ts && now < end){
+      state.eventPopups.push({...ev, endStep: end});
+    }
+  });
+  renderEventPopups();
+}
+
+function triggerEventPopup(ev){
+  const duration = ev.duration || 1;
+  const end = ev.ts + duration;
+  state.eventPopups = state.eventPopups.filter(x => !(x.type === ev.type && x.ts === ev.ts));
+  state.eventPopups.push({...ev, endStep: end});
+  const effectKey = `${ev.type || ev.id || ''}:${ev.ts}`;
+  if(isRainEvent(ev) && shouldTriggerEffect('rain', effectKey)){
+    triggerRainEffect();
+  }
+  if(isSnowEvent(ev) && shouldTriggerEffect('snow', effectKey)){
+    triggerSnowEffect();
+  }
+  if(isBugEvent(ev) && shouldTriggerEffect('bug', effectKey)){
+    triggerBugEffect();
+  }
+  renderEventPopups();
+}
+
+function renderEventPopups(){
+  const container = document.getElementById('event-stack');
+  if(!container) return;
+  const now = state.currentStep;
+  state.eventPopups = state.eventPopups.filter(ev => ev.endStep > now);
+  container.innerHTML = '';
+  state.eventPopups
+    .slice()
+    .sort((a,b)=> (b.endStep - a.endStep))
+    .forEach(ev=>{
+      const el = document.createElement('div');
+      el.className = 'event-banner wood-panel pixel-panel pixel-thin pointer-events-auto p-4 space-y-3';
+      const name = ev.name || titleize(ev.type);
+      const remaining = Math.max(0, ev.endStep - now);
+      const affects = (ev.affected || []).length ? ev.affected.join(', ') : 'All crops';
+      el.innerHTML = `
+        <div class="flex items-center justify-between gap-4">
+          <span class="font-semibold beige-text">${name}</span>
+          <span class="text-xs font-mono beige-text opacity-80">Day ${ev.ts}</span>
+        </div>
+        <p class="text-xs beige-text opacity-90">${ev.note || 'Seasonal conditions in effect.'}</p>
+        <p class="text-xs beige-text opacity-80">Affects: ${affects}</p>
+        <p class="text-xs font-semibold beige-text event-banner__expires">Expires in ${remaining} day${remaining === 1 ? '' : 's'}</p>
+      `;
+      container.appendChild(el);
+    });
+}
+
+function scheduleNextTick(){
+  if(!state.timerRunning) return;
+  if(state.timerId){
+    clearTimeout(state.timerId);
+  }
+  state.timerId = setTimeout(async ()=>{
+    state.timerId = null;
+    await advanceTick();
+    scheduleNextTick();
+  }, state.tickIntervalMs);
+}
+
+function startClock(){
+  if(state.timerRunning || state.timelineComplete) return;
+  state.timerRunning = true;
+  renderClock();
+  scheduleNextTick();
+}
+
+function pauseClock(){
+  state.timerRunning = false;
+  if(state.timerId){
+    clearTimeout(state.timerId);
+    state.timerId = null;
+  }
+  renderClock();
+}
+
+function toggleClock(){
+  if(state.timerRunning){
+    pauseClock();
+  }else{
+    if(state.timelineComplete){
+      toast('Growing a fresh season...');
+      newSeason();
+      return;
+    }
+    startClock();
+  }
+}
+
+// ---------- API Calls ----------
+async function getMacro() {
+  try{
+    const r = await fetch(`${API()}/macro`);
+    if(!r.ok) throw new Error(`macro ${r.status}`);
+    const j = await r.json();
+    return j.macro || j;
+  }catch(err){
+    console.error('macro fetch failed', err);
+    return {inflation_ann: 0.02, rf_rate_ann: 0.02, recession: false, term_spread: 1.0, vol_mult: 1.0, asof: 'Offline'};
+  }
+}
+
+async function newSeason() {
+  if(state.starting) return;
+  state.starting = true;
+  try{
+    const r = await fetch(`${API()}/demo_seed`, {method: 'POST'});
+    const j = await r.json();
+    if(!j.ok){ throw new Error('demo seed failed'); }
+    const seasonId = j.season_id || 'S1';
+    document.getElementById('season-id').textContent = seasonId;
+
+    const snapshot = await fetchSeasonSnapshot(seasonId);
+    const history = extendHistoryBackward(snapshot.prices);
+    const crops = snapshot.crops;
+    const events = snapshot.events;
+    const macro = await getMacro();
+
+    state.seasonId = seasonId;
+    state.crops = crops;
+    state.events = (events || []).slice().sort((a,b)=>a.ts - b.ts);
+    state.macro = macro;
+    state.cash = 10000;
+    state.holdings = {};
+    state.shorts = {};
+    state.txns = [];
+    state.costBasis = {};
+    state.shortBasis = {};
+    state.gardenSprites = {};
+    initTimeline(history);
+
+    renderMacro();
+    startSoundtrack();
+    renderMarket();
+    renderPortfolio();
+    renderTxns();
+    renderClock();
+    state.eventPopups = [];
+    hydrateEventPopups();
+    startClock();
+    toast('New season started!');
+  }catch(err){
+    console.error(err);
+    toast('Season start failed. Check backend server.');
+  }finally{
+    state.starting = false;
+  }
+}
+
+async function fetchSeasonSnapshot(seasonId){
+  const r = await fetch(`${API()}/season/${encodeURIComponent(seasonId)}/prices`);
+  if(!r.ok){
+    throw new Error(`season snapshot failed: ${r.status}`);
+  }
+  const j = await r.json();
+  const grouped = {};
+  for(const row of j.prices || []){
+    if(!grouped[row.crop_id]) grouped[row.crop_id] = [];
+    grouped[row.crop_id].push({ts: row.ts, price: row.price});
+  }
+  const prices = {};
+  Object.keys(grouped).forEach((cid)=>{
+    const series = grouped[cid].sort((a,b)=>a.ts-b.ts).map((pt)=>pt.price);
+    prices[cid] = series;
+  });
+  const crops = Object.keys(prices).sort();
+  return {prices, crops, events: j.events || []};
+}
+
+async function runMonteCarlo(){
+  const pricesNow = latestPrices();
+  const weights = portfolioWeights();
+  const cropParams = state.crops.map(cid => {
+    const est = estimateParams(state.prices[cid] || []);
+    return { crop_id: cid, mu: est.mu, sigma: est.sigma, seasonality_strength: est.seasonality_strength, jump_lam: 0.02, jump_mu: 0.0, jump_sig: 0.05 };
+  });
+  const body = { prices_now: pricesNow, weights, crop_params: cropParams, horizon_steps: 12, N: 1000 };
+  const r = await fetch(`${API()}/montecarlo`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const j = await r.json();
+  if(j.percentiles){
+    const p = j.percentiles["p5,p25,p50,p75,p95"];
+    toast(`Monte Carlo wealth x-multiple: p5=${p[0].toFixed(2)}, p50=${p[2].toFixed(2)}, p95=${p[4].toFixed(2)}`);
+  } else {
+    toast('Monte Carlo failed');
+  }
+}
+
+async function extendSeason(steps = 12){
+  if(!state.seasonId) return null;
+  const diversification = state.educationalMode ? 0 : computeDiversificationHHI();
+  const r = await fetch(`${API()}/season/${encodeURIComponent(state.seasonId)}/advance`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({steps, diversification_hhi: diversification})
+  });
+  if(!r.ok){
+    throw new Error(`extend failed: ${r.status}`);
+  }
+  return await r.json();
+}
+
+async function ensureFutureSteps(){
+  if(!state.seasonId || state.extending) return;
+  const remaining = state.maxStep - state.currentStep;
+  if(remaining > 1) return;
+  try{
+    state.extending = true;
+    const data = await extendSeason(12);
+    if(!data) return;
+    const grouped = {};
+    (data.prices || []).forEach(rec=>{
+      (grouped[rec.crop_id] ||= []).push(rec);
+    });
+    Object.entries(grouped).forEach(([cid, rows])=>{
+      rows.sort((a,b)=>a.ts - b.ts);
+      const target = state.fullHistory[cid] || [];
+      rows.forEach(row=>{
+        target.push(row.price);
+      });
+      state.fullHistory[cid] = target;
+      if(!state.prices[cid]){
+        state.prices[cid] = target.length ? [target[0]] : [];
+      }
+      if(!state.crops.includes(cid)){
+        state.crops.push(cid);
+        state.crops.sort();
+      }
+    });
+    if(data.prices && data.prices.length){
+      const newMax = Math.max(...data.prices.map(p=>p.ts));
+      state.maxStep = Math.max(state.maxStep, newMax);
+      state.timelineComplete = false;
+    }
+    if(data.events && data.events.length){
+      state.events = [...state.events, ...data.events].sort((a,b)=>a.ts - b.ts);
+    }
+    renderClock();
+    hydrateEventPopups();
+  }catch(err){
+    console.error(err);
+    toast('Unable to extend market timeline. Start a new season.');
+    state.timelineComplete = true;
+  }finally{
+    state.extending = false;
+  }
+}
+
+async function advanceTick(manual = false){
+  if(!state.seasonId) return false;
+
+  if(state.currentStep >= state.maxStep - 1){
+    await ensureFutureSteps();
+  }
+
+  const nextIndex = state.currentStep + 1;
+  const missingData = state.crops.some(cid=>{
+    const hist = state.fullHistory[cid] || [];
+    return hist[nextIndex] === undefined;
+  });
+  if(missingData){
+    if(!state.timelineComplete){
+      toast('Season timeline exhausted. Start a new season to keep growing.');
+      state.timelineComplete = true;
+    }
+    if(!manual){
+      pauseClock();
+    }
+    return false;
+  }
+
+  const penaltyRaw = state.educationalMode ? 0 : Math.max(0, computeDiversificationHHI() - 0.35);
+  const dampFactor = penaltyRaw > 0 ? Math.max(0.55, 1 - 0.45 * penaltyRaw) : 1;
+  state.currentStep = nextIndex;
+  state.crops.forEach(cid=>{
+    const hist = state.fullHistory[cid] || [];
+    let next = hist[nextIndex];
+    if(next === undefined) return;
+    if(!state.educationalMode && penaltyRaw > 0){
+      const prev = hist[nextIndex-1] ?? next;
+      next = prev + (next - prev) * dampFactor;
+      state.fullHistory[cid][nextIndex] = next;
+    }
+    const visible = state.prices[cid] || [];
+    visible.push(next);
+    if(visible.length > 180){
+      visible.shift();
+    }
+    state.prices[cid] = visible;
+  });
+  renderMarket();
+  renderPortfolio();
+  renderClock();
+  renderEventPopups();
+  const modal = document.getElementById('trade-modal');
+  if(modal && !modal.classList.contains('hidden') && currentCrop){
+    await buildModalChart(currentCrop);
+    updateTradeTotal();
+  }
+  const eventsThisStep = (state.events || []).filter(e => e.ts === state.currentStep);
+  if(eventsThisStep.length){
+    eventsThisStep.forEach(triggerEventPopup);
+  }
+  return true;
+}
+
+// ---------- Rendering ----------
+function renderMacro(){
+  const m = state.macro || {};
+  const el = document.getElementById('macro-card');
+  el.innerHTML = `
+    <p><span class="font-semibold">Inflation (YoY):</span> ${(100*(m.inflation_ann||0)).toFixed(1)}%</p>
+    <p><span class="font-semibold">Fed Funds (annual):</span> ${(100*(m.rf_rate_ann||0)).toFixed(2)}%</p>
+    <p><span class="font-semibold">Term Spread:</span> ${(m.term_spread||0).toFixed(2)}%</p>
+    <p><span class="font-semibold">Recession:</span> ${m.recession ? 'Yes' : 'No'}</p>
+    <p class="text-xs text-gray-500">As of ${m.asof||'—'}. Volatility multiplier applied: ${(m.vol_mult||1).toFixed(2)}×</p>
+  `;
+}
+
+function renderMarket(){
+  const grid = document.getElementById('plant-cards');
+  grid.innerHTML = '';
+  if(!state.crops.length){
+    grid.innerHTML = `<div class="col-span-full bg-white border border-dashed border-gray-300 rounded-lg p-6 text-center text-gray-500">
+      No plants yet. Start a season to populate the market garden.
+    </div>`;
+    return;
+  }
+  state.crops.forEach((cid, idx)=>{
+    const arr = state.prices[cid] || [];
+    const last = arr[arr.length-1] || 100;
+    const prev = arr[arr.length-2] || last;
+    const change = (last - prev) / (prev || 1);
+    const color = change > 0 ? 'price-up' : (change < 0 ? 'price-down' : 'price-neutral');
+    const meta = cropMeta(cid);
+    const qty = state.holdings[cid] || 0;
+    const basis = state.costBasis[cid] || 0;
+    const shortQty = state.shorts[cid] || 0;
+    const shortBasis = state.shortBasis[cid] || 0;
+    let positionHtml = '';
+    if(qty > 0){
+      const delta = basis > 0 ? (last - basis) / basis : 0;
+      const basisClass = delta >= 0 ? 'text-green-600' : 'text-red-600';
+      positionHtml += `<p class="text-xs ${basisClass}">Long ${qty} @ ${fmt(basis)} (${(delta*100).toFixed(1)}%)</p>`;
+    }
+    if(shortQty > 0){
+      const deltaShort = shortBasis > 0 ? (shortBasis - last) / shortBasis : 0;
+      const basisClassShort = deltaShort >= 0 ? 'text-green-600' : 'text-red-600';
+      positionHtml += `<p class="text-xs ${basisClassShort}">Short ${shortQty} @ ${fmt(shortBasis)} (${(deltaShort*100).toFixed(1)}%)</p>`;
+    }
+    const card = document.createElement('div');
+    card.className = 'plant-card wood-panel pixel-panel pixel-thin p-6 fade-in';
+    card.innerHTML = `
+      <div class="flex items-start justify-between gap-6">
+        <div class="plant-card-details">
+          <div class="mb-2 flex justify-start">
+            <img class="market-card-image" src="${SPRITE_BASE}/${ensureGardenSprite(cid, idx)}_0.png" alt="${meta.name} seed">
+          </div>
+          <h4 class="text-lg font-semibold beige-text">${meta.name}</h4>
+          <p class="text-sm beige-text opacity-80">${meta.tagline}</p>
+          ${positionHtml}
+        </div>
+        <div class="text-right price-display">
+          <div class="text-2xl font-mono font-semibold beige-text">${fmt(last)}</div>
+          <div class="${color} text-sm">${pct(change)}</div>
+        </div>
+      </div>
+      <div class="mt-auto pt-4">
+        <button class="w-full bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700" data-crop="${cid}">Trade</button>
+      </div>
+    `;
+    card.querySelector('button').addEventListener('click', ()=> openTradeModal(cid));
+    grid.appendChild(card);
+  });
+}
+
+function isRainEvent(ev){
+  if(!ev) return false;
+  const haystack = [
+    (ev.type || '').toString(),
+    (ev.name || '').toString(),
+    (ev.note || '').toString()
+  ].join(' ').toLowerCase();
+  return /\brain/.test(haystack);
+}
+
+function isSnowEvent(ev){
+  if(!ev) return false;
+  const haystack = [
+    (ev.type || '').toString(),
+    (ev.id || '').toString(),
+    (ev.name || '').toString(),
+    (ev.note || '').toString()
+  ].join(' ').toLowerCase();
+  return haystack.includes('snow') || haystack.includes('blizzard') || haystack.includes('bear_storm') || haystack.includes('stormy bear');
+}
+
+function isBugEvent(ev){
+  if(!ev) return false;
+  const haystack = [
+    (ev.type || '').toString(),
+    (ev.id || '').toString(),
+    (ev.name || '').toString(),
+    (ev.note || '').toString()
+  ].join(' ').toLowerCase();
+  return haystack.includes('bug') || haystack.includes('insect') || haystack.includes('pest') || haystack.includes('locust');
+}
+
+function shouldTriggerEffect(kind, key){
+  if(!key) return true;
+  if(lastEffectKey[kind] === key) return false;
+  lastEffectKey[kind] = key;
+  return true;
+}
+
+function runParticleEffect(kind, options, populate){
+  const { duration = 4000, waitForCompletion = false } = options || {};
+  const overlay = document.getElementById('particle-overlay');
+  if(!overlay) return;
+  if(typeof overlay._cleanup === 'function'){
+    overlay._cleanup(true);
+  }
+  overlay.innerHTML = '';
+  overlay.classList.remove('active','rain-mode','snow-mode','bug-mode');
+  overlay.classList.add('active', `${kind}-mode`);
+  let cleaned = false;
+  const cleanup = (force = false) => {
+    if(cleaned) return;
+    cleaned = true;
+    clearTimeout(particleTimer);
+    overlay.classList.remove('active','rain-mode','snow-mode','bug-mode');
+    if(!force){
+      overlay.innerHTML = '';
+    }else{
+      overlay.innerHTML = '';
+    }
+    overlay._cleanup = null;
+  };
+  overlay._cleanup = cleanup;
+  populate(overlay);
+  const particles = Array.from(overlay.children || []);
+  if(waitForCompletion && particles.length){
+    let remaining = particles.length;
+    const onEnd = (event) => {
+      event.target.removeEventListener('animationend', onEnd);
+      remaining -= 1;
+      if(remaining <= 0){
+        cleanup();
+      }
+    };
+    particles.forEach(el => el.addEventListener('animationend', onEnd));
+    clearTimeout(particleTimer);
+    particleTimer = setTimeout(() => cleanup(), duration);
+  } else {
+    clearTimeout(particleTimer);
+    particleTimer = setTimeout(() => cleanup(), duration);
+    if(waitForCompletion && particles.length === 0){
+      cleanup();
+    }
+  }
+}
+
+function triggerRainEffect(duration = 7600){
+  runParticleEffect('rain', { duration, waitForCompletion: true }, overlay => {
+    const dropCount = 120;
+    for(let i = 0; i < dropCount; i++){
+      const drop = document.createElement('span');
+      drop.className = 'raindrop';
+      const left = Math.random() * 100;
+      const width = 0.8 + Math.random() * 1.2;
+      const delay = Math.random() * 0.6;
+      const durationMs = 0.9 + Math.random() * 0.5 + 5;
+      const height = 24 + Math.random() * 32;
+      drop.style.left = `${left}vw`;
+      drop.style.height = `${height}px`;
+      drop.style.width = `${width}px`;
+      drop.style.animationDuration = `${durationMs}s`;
+      drop.style.animationDelay = `${delay}s`;
+      overlay.appendChild(drop);
+    }
+  });
+}
+
+function triggerSnowEffect(duration = 7800){
+  runParticleEffect('snow', { duration, waitForCompletion: true }, overlay => {
+    const flakeCount = 140;
+    for(let i = 0; i < flakeCount; i++){
+      const flake = document.createElement('span');
+      flake.className = 'snowflake';
+      const left = Math.random() * 100;
+      const delay = Math.random() * 0.8;
+      const durationMs = 1.8 + Math.random() * 1.4 + 5;
+      const drift = (Math.random() * 20 - 10).toFixed(2);
+      const size = 3 + Math.random() * 2;
+      flake.style.left = `${left}vw`;
+      flake.style.width = `${size}px`;
+      flake.style.height = `${size * 2}px`;
+      flake.style.animationDuration = `${durationMs}s`;
+      flake.style.animationDelay = `${delay}s`;
+      flake.style.setProperty('--drift', `${drift}vw`);
+      overlay.appendChild(flake);
+    }
+  });
+}
+
+function triggerBugEffect(duration = 7600){
+  runParticleEffect('bug', { duration, waitForCompletion: false }, overlay => {
+    const flyCount = 32;
+    for(let i = 0; i < flyCount; i++){
+      const fly = document.createElement('span');
+      fly.className = 'fly-dot';
+      const left = 5 + Math.random() * 90;
+      const top = 10 + Math.random() * 70;
+      const delay = Math.random() * 0.5;
+      const durationMs = 1.4 + Math.random() * 1.1 + 5;
+      const tx = (Math.random() * 140 - 70).toFixed(1);
+      const ty = (Math.random() * 120 - 60).toFixed(1);
+      fly.style.left = `${left}vw`;
+      fly.style.top = `${top}vh`;
+      fly.style.animationDuration = `${durationMs}s`;
+      fly.style.animationDelay = `${delay}s`;
+      fly.style.setProperty('--tx', `${tx}px`);
+      fly.style.setProperty('--ty', `${ty}px`);
+      overlay.appendChild(fly);
+    }
+  });
+}
+
+function renderShorts(){
+  const grid = document.getElementById('short-cards');
+  if(!grid) return;
+  const active = state.crops.filter(cid => (state.shorts[cid] || 0) > 0);
+  if(!active.length){
+    grid.innerHTML = `<div class="col-span-full shorted-empty wood-panel pixel-panel pixel-thin p-6 text-center beige-text opacity-80">
+      No borrowed seeds. Use Borrow & Short to profit from falling prices.
+    </div>`;
+    return;
+  }
+  grid.innerHTML = '';
+  active.forEach((cid, idx) => {
+    const qty = state.shorts[cid] || 0;
+    const basis = state.shortBasis[cid] || 0;
+    const arr = state.prices[cid] || [];
+    const last = arr[arr.length-1] || 100;
+    const prev = arr[arr.length-2] || last;
+    const change = (last - prev) / (prev || 1);
+    const pnl = qty * (basis - last);
+    const pnlClass = pnl >= 0 ? 'text-green-600' : 'text-red-600';
+    const meta = cropMeta(cid);
+    const sprite = ensureGardenSprite(cid, idx);
+    const card = document.createElement('div');
+    card.className = 'plant-card wood-panel pixel-panel pixel-thin p-6 fade-in';
+    card.innerHTML = `
+      <div class="flex items-start justify-between gap-6">
+        <div class="plant-card-details">
+          <div class="short-card-thumb mb-2">
+            <img class="market-card-image" src="${SPRITE_BASE}/${sprite}_4.png" alt="${meta.name} sprite">
+          </div>
+          <h4 class="text-lg font-semibold beige-text">${meta.name}</h4>
+          <p class="text-sm beige-text opacity-80">Borrowed ${qty} @ ${fmt(basis)}</p>
+          <p class="text-sm font-mono ${pnlClass}">${fmtSigned(pnl)} unrealized</p>
+        </div>
+        <div class="text-right price-display">
+          <div class="text-2xl font-mono font-semibold beige-text">${fmt(last)}</div>
+          <div class="${change>0?'price-up':(change<0?'price-down':'price-neutral')} text-sm">${pct(change)}</div>
+        </div>
+      </div>
+      <div class="mt-auto pt-4">
+        <button class="w-full bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700" data-crop="${cid}">Manage</button>
+      </div>
+    `;
+    card.querySelector('button').addEventListener('click', ()=> openTradeModal(cid));
+    grid.appendChild(card);
+  });
+}
+
+function renderPortfolio(){
+  // Compute total value
+  const last = latestPrices();
+  let plants = 0;
+  let value = state.cash;
+  let growth = 0;
+  for(const cid of state.crops){
+    const qty = state.holdings[cid] || 0;
+    const shortQty = state.shorts[cid] || 0;
+    plants += qty;
+    plants -= shortQty;
+    value += qty * (last[cid]||0);
+    value -= shortQty * (last[cid]||0);
+    const series = state.prices[cid] || [];
+    if(series.length > 1){
+      const delta = series[series.length-1] - series[series.length-2];
+      growth += qty * delta;
+      growth -= shortQty * delta;
+    }
+  }
+  document.getElementById('header-cash').textContent = fmt(state.cash);
+  document.getElementById('header-portfolio-value').textContent = fmt(value);
+  document.getElementById('stat-total-value').textContent = fmt(value);
+  document.getElementById('stat-cash').textContent = fmt(state.cash);
+  document.getElementById('stat-plants-owned').textContent = plants.toString();
+  const growthEl = document.getElementById('stat-today-growth');
+  if(growthEl){
+    growthEl.textContent = fmtSigned(growth);
+    growthEl.className = `text-2xl font-mono font-semibold ${growth >= 0 ? 'text-green-600' : 'text-red-600'}`;
+  }
+
+  renderGarden();
+  renderShorts();
+}
+
+function ensureGardenSprite(cid, idx){
+  state.gardenSprites = state.gardenSprites || {};
+  if(state.gardenSprites[cid]) return state.gardenSprites[cid];
+  const override = GARDEN_SPRITE_OVERRIDES[cid];
+  if(override){
+    state.gardenSprites[cid] = override;
+    return override;
+  }
+  const used = new Set(Object.values(state.gardenSprites));
+  const pool = GARDEN_SPRITE_POOL;
+  let sprite = pool.find(name => !used.has(name));
+  if(!sprite){
+    sprite = pool[idx % pool.length] || pool[0];
+  }
+  state.gardenSprites[cid] = sprite;
+  return sprite;
+}
+
+function createGardenPlot(sprite, stage){
+  const plot = document.createElement('div');
+  plot.className = 'garden-plot';
+
+  const tile = document.createElement('img');
+  tile.src = `${TILE_BASE}/dirt.png`;
+  tile.alt = 'dirt tile';
+  tile.className = 'garden-tile';
+  plot.appendChild(tile);
+
+  if(sprite && stage !== null && stage !== undefined){
+    const img = document.createElement('img');
+    img.src = `${SPRITE_BASE}/${sprite}_${stage}.png`;
+    img.alt = sprite;
+    img.className = 'garden-plant';
+    plot.appendChild(img);
+  } else {
+    plot.classList.add('garden-plot--empty');
+  }
+
+  return plot;
+}
+
+function renderGarden(){
+  const grid = document.getElementById('garden-grid');
+  if(!grid) return;
+  grid.innerHTML = '';
+
+  const crops = state.crops.slice(0, MAX_GARDEN_COLUMNS);
+  for(let i = 0; i < MAX_GARDEN_COLUMNS; i++){
+    const column = document.createElement('div');
+    column.className = 'garden-column';
+
+    const cid = crops[i];
+    if(cid){
+      const sprite = ensureGardenSprite(cid, i);
+      const qty = Math.max(0, state.holdings[cid] || 0);
+      const tileCount = Math.max(1, Math.ceil(qty / 20));
+
+      for(let t = 0; t < tileCount; t++){
+        const remaining = Math.max(0, qty - t * 20);
+        const portion = Math.min(remaining, 20);
+        let stage = null;
+        let tileSprite = null;
+        if(portion > 0){
+          const ratio = portion / 20;
+          stage = Math.ceil(ratio * 4);
+          stage = Math.max(1, Math.min(4, stage));
+          tileSprite = sprite;
+        }
+        column.appendChild(createGardenPlot(tileSprite, stage));
+      }
+    } else {
+      column.appendChild(createGardenPlot(null, null));
+    }
+
+    grid.appendChild(column);
+  }
+}
+
+function updateHeader(){ renderPortfolio(); }
+
+// ---------- Trade Modal ----------
+let modalChart = null;
+let currentCrop = null;
+let particleTimer = null;
+const lastEffectKey = { rain: null, snow: null, bug: null };
+
+function openTradeModal(cid){
+  currentCrop = cid;
+  const modal = document.getElementById('trade-modal');
+  modal.classList.remove('hidden');
+  const meta = cropMeta(cid);
+  document.getElementById('modal-plant-name').textContent = meta.name;
+  document.getElementById('modal-plant-id').textContent = cid;
+  const arr = state.prices[cid]||[100,100.5,101];
+  const last = arr[arr.length-1], prev = arr[arr.length-2]||last;
+  const change = (last-prev)/(prev||1);
+  document.getElementById('modal-current-price').textContent = fmt(last);
+  const pc = document.getElementById('modal-price-change');
+  pc.textContent = pct(change);
+  pc.className = `text-sm font-medium ${change>0?'price-up':(change<0?'price-down':'price-neutral')}`;
+  document.getElementById('modal-available-cash').textContent = fmt(state.cash);
+  const owned = state.holdings[cid]||0;
+  const basis = state.costBasis[cid] || 0;
+  const borrowed = state.shorts[cid] || 0;
+  const borrowBasis = state.shortBasis[cid] || 0;
+  const hi = document.getElementById('holdings-info');
+  if(owned>0){
+    hi.classList.remove('hidden');
+    document.getElementById('modal-holdings').textContent = `${owned} plants`;
+    const basisEl = document.getElementById('modal-holdings-basis');
+    if(basisEl){
+      basisEl.textContent = `${fmt(basis)} avg cost`;
+    }
+  } else {
+    hi.classList.add('hidden');
+  }
+  const si = document.getElementById('short-info');
+  if(borrowed>0){
+    si.classList.remove('hidden');
+    document.getElementById('modal-short-qty').textContent = `${borrowed} plants`;
+    document.getElementById('modal-short-basis').textContent = `${fmt(borrowBasis)} avg borrow`;
+  } else {
+    si.classList.add('hidden');
+  }
+  document.getElementById('trade-quantity').value = 1;
+  updateTradeTotal();
+
+  // Build chart with history + forecast
+  buildModalChart(cid);
+}
+
+function closeTradeModal(){
+  const modal = document.getElementById('trade-modal');
+  modal.classList.add('hidden');
+  if(modalChart){ modalChart.destroy(); modalChart = null; }
+}
+
+function updateTradeTotal(){
+  const qty = parseInt(document.getElementById('trade-quantity').value || '0',10);
+  const price = (state.prices[currentCrop]||[]).slice(-1)[0] || 0;
+  document.getElementById('trade-total').textContent = fmt(qty*price);
+}
+
+async function buildModalChart(cid){
+  const ctx = document.getElementById('modal-chart').getContext('2d');
+  const hist = (state.fullHistory[cid]||[]).slice(0, state.currentStep + 1).slice(-50);
+  // fetch forecast
+  let fc = {mean:[], p10:[], p90:[]};
+  try{
+    const fr = await fetch(`${API()}/forecast`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({season_id: state.seasonId, crop_ids: [cid], horizon: 12})
+    });
+    if(fr.ok){
+      const fj = await fr.json();
+      fc = (fj.forecasts && fj.forecasts[cid]) || fc;
+    }
+  }catch(err){
+    console.warn('forecast fetch failed', err);
+  }
+
+  const labels = [...hist.map((_,i)=>`t-${hist.length-i}`), ...fc.mean.map((_,i)=>`+${i+1}`)];
+  const histData = hist;
+  let forecastData = fc.mean ? [...fc.mean] : [];
+  let bandLow = fc.p10 ? [...fc.p10] : [];
+  let bandHigh = fc.p90 ? [...fc.p90] : [];
+  if(hist.length && forecastData.length){
+    const anchor = hist[hist.length-1];
+    const offset = forecastData[0] - anchor;
+    forecastData = forecastData.map(v => v - offset);
+    bandLow = bandLow.map(v => v - offset);
+    bandHigh = bandHigh.map(v => v - offset);
+  }
+
+  if(modalChart){ modalChart.destroy(); }
+  modalChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {label: 'History', data: histData, borderWidth: 2, tension: 0.2},
+        {label: 'Forecast (mean)', data: [...Array(hist.length).fill(null), ...forecastData], borderWidth: 2, borderDash: [6,4], tension: 0.2},
+        {label: 'p10', data: [...Array(hist.length).fill(null), ...bandLow], borderWidth: 1, borderDash: [2,2], tension: 0.2},
+        {label: 'p90', data: [...Array(hist.length).fill(null), ...bandHigh], borderWidth: 1, borderDash: [2,2], tension: 0.2},
+      ]
+    },
+    options: {
+      plugins: {
+        legend: {
+          display: true,
+          labels: {
+            color: '#ead9b5',
+            font: {
+              family: 'Press Start 2P, Inter, sans-serif',
+              size: 10
+            },
+            boxWidth: 12,
+            padding: 12
+          }
+        }
+      },
+      scales: {
+        y: { beginAtZero: false, ticks: { color: '#ead9b5' }, grid: { color: 'rgba(234, 217, 181, 0.25)' } },
+        x: { ticks: { color: '#ead9b5' }, grid: { color: 'rgba(234, 217, 181, 0.15)' } }
+      }
+    }
+  });
+}
+
+function executeBuy(){
+  const qty = parseInt(document.getElementById('trade-quantity').value || '0',10);
+  if(!qty || qty < 1) return;
+  const price = (state.prices[currentCrop]||[]).slice(-1)[0] || 0;
+  const cost = qty * price;
+  if(cost > state.cash){ toast('Not enough cash'); return; }
+  state.cash -= cost;
+  const prevQty = state.holdings[currentCrop] || 0;
+  const prevBasis = state.costBasis[currentCrop] || 0;
+  const newQty = prevQty + qty;
+  const totalCost = prevQty * prevBasis + cost;
+  state.holdings[currentCrop] = newQty;
+  state.costBasis[currentCrop] = newQty ? totalCost / newQty : 0;
+  state.txns.unshift({t: Date.now(), type:'BUY', cid: currentCrop, qty, price});
+  playPlantingSound();
+  renderPortfolio();
+  renderTxns();
+  updateTradeTotal();
+  toast(`Bought ${qty} ${currentCrop}`);
+}
+
+function executeSell(){
+  const qty = parseInt(document.getElementById('trade-quantity').value || '0',10);
+  if(!qty || qty < 1) return;
+  const owned = state.holdings[currentCrop]||0;
+  if(qty > owned){ toast('Not enough holdings'); return; }
+  const price = (state.prices[currentCrop]||[]).slice(-1)[0] || 0;
+  const proceeds = qty * price;
+  state.cash += proceeds;
+  state.holdings[currentCrop] = owned - qty;
+  if(state.holdings[currentCrop] <= 0){
+    state.holdings[currentCrop] = 0;
+    state.costBasis[currentCrop] = 0;
+  }
+  state.txns.unshift({t: Date.now(), type:'SELL', cid: currentCrop, qty, price});
+  playPlantingSound();
+  renderPortfolio();
+  renderTxns();
+  updateTradeTotal();
+  toast(`Sold ${qty} ${currentCrop}`);
+}
+
+function executeShort(){
+  const qty = parseInt(document.getElementById('trade-quantity').value || '0',10);
+  if(!qty || qty < 1) return;
+  const price = (state.prices[currentCrop]||[]).slice(-1)[0] || 0;
+  const proceeds = qty * price;
+  state.cash += proceeds;
+  const prevQty = state.shorts[currentCrop] || 0;
+  const prevBasis = state.shortBasis[currentCrop] || 0;
+  const newQty = prevQty + qty;
+  const totalBorrow = prevQty * prevBasis + qty * price;
+  state.shorts[currentCrop] = newQty;
+  state.shortBasis[currentCrop] = newQty ? totalBorrow / newQty : 0;
+  state.txns.unshift({t: Date.now(), type:'SHORT', cid: currentCrop, qty, price});
+  playPlantingSound();
+  renderPortfolio();
+  renderTxns();
+  updateTradeTotal();
+  toast(`Borrowed ${qty} ${currentCrop} and sold short`);
+}
+
+function executeCover(){
+  const qty = parseInt(document.getElementById('trade-quantity').value || '0',10);
+  if(!qty || qty < 1) return;
+  const borrowed = state.shorts[currentCrop] || 0;
+  if(qty > borrowed){ toast('Not enough borrowed seeds'); return; }
+  const price = (state.prices[currentCrop]||[]).slice(-1)[0] || 0;
+  const cost = qty * price;
+  if(cost > state.cash){ toast('Not enough cash to cover'); return; }
+  state.cash -= cost;
+  state.shorts[currentCrop] = borrowed - qty;
+  if(state.shorts[currentCrop] <= 0){
+    state.shorts[currentCrop] = 0;
+    state.shortBasis[currentCrop] = 0;
+  }
+  state.txns.unshift({t: Date.now(), type:'COVER', cid: currentCrop, qty, price});
+  playPlantingSound();
+  renderPortfolio();
+  renderTxns();
+  updateTradeTotal();
+  toast(`Covered ${qty} ${currentCrop}`);
+}
+
+function renderTxns(){
+  const list = document.getElementById('transactions-list');
+  if(!state.txns.length){
+    list.innerHTML = `<div class="p-8 text-center text-gray-500"><p>No transactions yet.</p></div>`;
+    return;
+  }
+  list.innerHTML = state.txns.slice(0,10).map(x=>{
+    let color = 'text-gray-900';
+    if(x.type === 'BUY') color = 'text-green-700';
+    else if(x.type === 'SELL') color = 'text-red-700';
+    else if(x.type === 'SHORT') color = 'text-yellow-600';
+    else if(x.type === 'COVER') color = 'text-blue-700';
+    const meta = cropMeta(x.cid);
+    return `<div class="flex justify-between items-center px-4 py-2 border-b border-gray-100">
+      <div class="${color} font-semibold">${x.type}</div>
+      <div class="font-mono">${meta.name}</div>
+      <div class="font-mono">qty ${x.qty}</div>
+      <div class="font-mono">${fmt(x.price)}</div>
+    </div>`;
+  }).join('');
+}
+
+// ---------- Wire buttons ----------
+document.getElementById('btn-new-season').addEventListener('click', newSeason);
+document.getElementById('btn-report').addEventListener('click', async ()=>{
+  if(!state.seasonId){ toast('Start a season first'); return; }
+  const r = await fetch(`${API()}/report`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({season_id: state.seasonId})});
+  const j = await r.json();
+  if(j && j.metrics){
+    const m = j.metrics;
+    toast(`Report → Sharpe ${(m.sharpe||0).toFixed(2)}, MDD ${(100*(m.mdd||0)).toFixed(1)}%, Wealth x${(m.wealth||1).toFixed(2)}`);
+  } else {
+    toast('Report failed');
+  }
+});
+document.getElementById('btn-mc').addEventListener('click', runMonteCarlo);
+document.getElementById('btn-toggle-clock').addEventListener('click', toggleClock);
+document.getElementById('btn-step').addEventListener('click', async ()=>{
+  if(state.timelineComplete){
+    await newSeason();
+    return;
+  }
+  pauseClock();
+  await advanceTick(true);
+});
+
+// ---------- Boot ----------
+(async function boot(){
+  setupIntroOverlay();
+  try{
+    const macro = await getMacro();
+    state.macro = macro || {};
+    renderMacro();
+  }catch(e){
+    console.error('macro fetch failed', e);
+  }
+})();

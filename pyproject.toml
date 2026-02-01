@@ -19,5 +19,16 @@ app = "main:app"
 
 [tool.setuptools]
 py-modules = ["main"]
-packages = []
-include-package-data = false
+packages = ["public"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"public" = [
+    "*.html",
+    "*.css",
+    "*.js",
+    "*.png",
+    "*.mp3",
+    "images/*",
+    "images/*/*",
+]
