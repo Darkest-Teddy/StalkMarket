@@ -65,9 +65,17 @@ const GARDEN_SPRITE_OVERRIDES = {
 const GARDEN_SPRITE_POOL = ['wheat','pumpkin','tomato','potato','carrot','radish','beet','jalapeno','califlower'];
 const MAX_GARDEN_COLUMNS = 8; // 8 columns horizontally
 const BASE_GARDEN_ROWS = 1;   // 1 row (8 tiles total)
-const SPRITE_BASE = '../public/images/Objects';
-const TILE_BASE = '../public/images/Tiles';
-const AUDIO_BASE = '../public/images/Objects';
+
+const STATIC_BASE_URL = (() => {
+  const override = window.STALK_PUBLIC_BASE || window.FF_PUBLIC_BASE;
+  const base = override ? new URL(override, window.location.href) : new URL('./public/', window.location.href);
+  return base;
+})();
+
+const stripTrailingSlash = (url) => url.replace(/\/+$/, '');
+const SPRITE_BASE = stripTrailingSlash(new URL('images/Objects/', STATIC_BASE_URL).href);
+const TILE_BASE = stripTrailingSlash(new URL('images/Tiles/', STATIC_BASE_URL).href);
+const AUDIO_BASE = stripTrailingSlash(new URL('images/Objects/', STATIC_BASE_URL).href);
 const MIN_HISTORY_POINTS = 20;
 
 const audioState = {
