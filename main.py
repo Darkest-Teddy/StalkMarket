@@ -301,7 +301,8 @@ class ReportResponse(BaseModel):
 
 from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(title="FarmFinance API", version="0.3.0")
-__all__ = ["app"]
+api = app  # alias expected by uvicorn entrypoint
+__all__ = ["app", "api"]
 
 # CORS (dev)
 api.add_middleware(
