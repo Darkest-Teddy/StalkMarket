@@ -9,15 +9,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://stalkmarket.onrender.com/api/:path*"
-    }
-  ],
-  "routes": [
-    {
-      "handle": "filesystem"
     },
     {
-      "src": "/(.*)",
-      "dest": "public/index.html"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
