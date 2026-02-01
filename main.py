@@ -11,7 +11,10 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass
 import numpy as np
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -633,6 +636,13 @@ def report(req: ReportRequest):
                           diversification=dict(HHI=HHI, N_eff=N_eff, corr=C.tolist(), crops=crop_ids),
                           market_exposure=dict(alpha=alpha, beta=beta), behavior=dict(), tips=tips,
                           counterfactual=counterfactual, macro=macro)
+
+@api.get("/", response_class=HTMLResponse)
+def read_root():
+    index_path = Path("public/index.html")
+    if index_path.is_file():
+        return FileResponse(index_path)
+    return {"message": "Farm Finance API", "status": "online"}
 
 @api.post("/demo_seed")
 def demo_seed(season_id: str = "S1"):
