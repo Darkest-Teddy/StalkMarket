@@ -1,4 +1,4 @@
-﻿[project]
+[project]
 name = "stalk-market"
 version = "0.1.0"
 description = "Stalk Market FastAPI backend"
