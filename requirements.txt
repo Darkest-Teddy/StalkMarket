@@ -1,0 +1,8 @@
+﻿fastapi
+uvicorn
+numpy
+pandas
+pydantic
+statsmodels
+fredapi
+google-genai
