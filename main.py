@@ -14,6 +14,7 @@ import numpy as np
 
 from fastapi import FastAPI, HTTPException, APIRouter
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 try:
     from importlib.resources import files as resource_files
@@ -385,6 +386,9 @@ def _discover_public_root() -> Optional[Path]:
 
 PUBLIC_DIR = _discover_public_root()
 
+if PUBLIC_DIR and PUBLIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(PUBLIC_DIR)), name="static")
+
 __all__ = ["app", "api"]
 
 # CORS (dev)
@@ -398,6 +402,14 @@ app.add_middleware(
 
 @api_router.get("/health")
 def health(): return {"ok": True, "time": time.time()}
+
+@api_router.get("/test")
+def api_test():
+    return {"message": "API is working!"}
+
+@api_router.get("/data")
+def api_data():
+    return {"data": [1, 2, 3]}
 
 @api_router.get("/macro")
 def macro_snapshot():
