@@ -15,6 +15,10 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+try:
+    from importlib.resources import files as resource_files
+except ImportError:
+    resource_files = None
 
 try:
     import pandas as pd
@@ -362,7 +366,23 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(title="FarmFinance API", version="0.3.0")
 api = app  # alias expected by uvicorn entrypoint
 
-PUBLIC_DIR = (Path(__file__).resolve().parent / "public").resolve()
+def _discover_public_root() -> Optional[Path]:
+    local_dir = (Path(__file__).resolve().parent / "public").resolve()
+    if local_dir.exists():
+        return local_dir
+    if resource_files is not None:
+        try:
+            res = resource_files("public")
+            # convert to concrete path if available
+            if hasattr(res, "joinpath"):
+                pt = Path(res)
+                if pt.exists():
+                    return pt
+        except Exception:
+            pass
+    return None
+
+PUBLIC_DIR = _discover_public_root()
 
 __all__ = ["app", "api"]
 
@@ -652,7 +672,7 @@ def _safe_public_path(relative: str) -> Optional[Path]:
     Resolve a path inside ``public`` safely, ensuring callers can't escape the directory.
     Returns None if the folder is missing or the file doesn't exist.
     """
-    if not PUBLIC_DIR.exists():
+    if PUBLIC_DIR is None or not PUBLIC_DIR.exists():
         return None
     candidate = (PUBLIC_DIR / relative).resolve()
     try:
