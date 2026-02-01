@@ -6,7 +6,6 @@ risk fitting, season prices endpoint, and report.
 """
 from __future__ import annotations
 
-from google import genai
 import os, math, time, random, copy
 from typing import Dict, List, Optional
 from dataclasses import dataclass

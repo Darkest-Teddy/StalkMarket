@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "farm-finance-api"
 version = "0.3.0"
@@ -9,8 +13,12 @@ dependencies = [
     "pandas>=2.0.0",
     "statsmodels>=0.14.0",
     "fredapi>=0.5.0",
-    "google-genai>=0.1.0",
 ]
 
 [project.scripts]
 app = "main:app"
+
+[tool.setuptools]
+py-modules = ["main"]
+packages = []
+include-package-data = false
