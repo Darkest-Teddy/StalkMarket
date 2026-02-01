@@ -9,12 +9,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Press+Start+2P&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./style.css">
   <script>
     (function setStaticBase(){
       if (window.STALK_PUBLIC_BASE) return;
       var path = window.location && window.location.pathname ? window.location.pathname : "";
-      window.STALK_PUBLIC_BASE = path.indexOf("/main/Code/") !== -1 ? "../public/" : "/main/public/";
+      if (path.indexOf("/main/Code/") !== -1) {
+        window.STALK_PUBLIC_BASE = "../public/";
+      } else if (path.indexOf("/main/public/") !== -1) {
+        window.STALK_PUBLIC_BASE = "/main/public/";
+      } else {
+        window.STALK_PUBLIC_BASE = "./";
+      }
     })();
   </script>
 </head>
@@ -276,7 +282,7 @@ Welcome to the Stalk Market simulator, designed to let you explore trading strat
   <script>
     window.API_BASE = localStorage.getItem('FF_API_BASE') || 'http://localhost:8000';
   </script>
-  <script src="./app.js"></script>
+  <script src="./script.js"></script>
 </body>
 </html>
 

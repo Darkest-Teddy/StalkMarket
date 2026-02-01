@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FRONTEND_DIR="$ROOT_DIR/main/Code"
+FRONTEND_DIR="$ROOT_DIR/main/public"
 BACKEND_DIR="$ROOT_DIR"
 
 if [ -f "$ROOT_DIR/.venv/bin/activate" ]; then

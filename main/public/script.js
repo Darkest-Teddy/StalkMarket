@@ -79,10 +79,10 @@ const STATIC_BASE_URL = (() => {
   if (path.indexOf('/main/Code/') !== -1) {
     return new URL('../public/', window.location.href);
   }
-  if (window.location && window.location.origin && window.location.origin !== 'null') {
+  if (path.indexOf('/main/public/') !== -1 && window.location && window.location.origin && window.location.origin !== 'null') {
     return new URL('/main/public/', window.location.origin);
   }
-  return new URL('../public/', window.location.href);
+  return new URL('./', window.location.href);
 })();
 
 const stripTrailingSlash = (url) => url.replace(/\/+$/, '');

@@ -16,8 +16,8 @@
     --green-500: #2ecc71;
     --green-700: #1b8a4a;
     --green-900: #0c4a2e;
-    --tiles-bg-url: url('../public/images/Tiles/Background.png');
-    --tiles-header-url: url('../public/images/Tiles/Header.png');
+    --tiles-bg-url: url('./images/Tiles/Background.png');
+    --tiles-header-url: url('./images/Tiles/Header.png');
 }
 
 * { font-family: var(--font-sans); }
