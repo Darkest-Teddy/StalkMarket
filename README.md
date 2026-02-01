@@ -20,15 +20,33 @@ Our platform is designed for **accessibility and fun**. Users track their portfo
 
 ## Running the Project
 
-### Step 1. Navigate to the Project Root
-Go to the repository root:
+### Option A: Local development
 ```bash
-cd .../StalkMarket
+cd path/to/StalkMarket
+python -m uvicorn main:app --reload --port 8000
 ```
-### Step 2. Run the Python File
-```bash
-python -m uvicorn main:api --reload --port 8000
-```
+Frontend assets live in `public/`; open `public/index.html` or run a static server (e.g., `python -m http.server 5173`).
+
+### Option B: Render (backend) + Vercel (frontend)
+1. **Render backend**
+   - Push this repo (including `Dockerfile` and `requirements.txt`) to GitHub/GitLab.
+   - Create a Render Web Service → choose Docker → point to the repo.
+   - Render runs `uvicorn main:app --host 0.0.0.0 --port 8000` automatically.
+   - Add env vars like `FRED_API_KEY` in the Render dashboard.
+   - Note the service URL, e.g. `https://your-render-service.onrender.com`.
+2. **Vercel frontend**
+   - `vercel.json` already rewrites `/api/*` to the Render URL. Replace `https://your-render-service.onrender.com` with your actual Render endpoint, commit, and redeploy on Vercel.
+   - Vercel serves everything in `public/` as static assets; API calls are proxied to Render.
+3. **Seed a season after deployment**
+   - The backend stores data in memory, so call the demo seed endpoint after each fresh deployment:
+     ```bash
+     curl -X POST https://your-vercel-domain.vercel.app/api/demo_seed
+     ```
+   - This populates the default season so the `/api/season/...` routes have data.
+4. **Verify**
+   - Visit your Vercel URL, open dev tools → Network, and confirm `/api/...` requests return 200 responses.
+
+Once Render is running, you no longer need to start uvicorn manually—Vercel routes all API traffic to the Render service.
 
 ## Accomplishments
 * Developed a working hybrid AI + algorithmic stock simulation
