@@ -3,19 +3,7 @@
  * State is client-side (localStorage) for hackathon simplicity.
  */
 
-const API = (() => {
-  const strip = (url) => (url || '').replace(/\/+$/, '');
-  const guessBase = () => {
-    if (typeof window !== 'undefined') {
-      if (window.API_BASE) return window.API_BASE;
-      const loc = window.location || {};
-      if (loc.origin && loc.origin !== 'null') return loc.origin;
-    }
-    return 'http://localhost:8000';
-  };
-  const base = strip(guessBase());
-  return () => `${base}/api`;
-})();
+const API = () => window.API_BASE || '';
 
 // ---------- Global State ----------
 const state = {
@@ -493,7 +481,7 @@ function toggleClock(){
 // ---------- API Calls ----------
 async function getMacro() {
   try{
-    const r = await fetch(`${API()}/macro`);
+    const r = await fetch(`${API()}/api/macro`);
     if(!r.ok) throw new Error(`macro ${r.status}`);
     const j = await r.json();
     return j.macro || j;
@@ -507,7 +495,7 @@ async function newSeason() {
   if(state.starting) return;
   state.starting = true;
   try{
-    const r = await fetch(`${API()}/demo_seed`, {method: 'POST'});
+    const r = await fetch(`${API()}/api/demo_seed`, {method: 'POST'});
     const j = await r.json();
     if(!j.ok){ throw new Error('demo seed failed'); }
     const seasonId = j.season_id || 'S1';
@@ -551,7 +539,7 @@ async function newSeason() {
 }
 
 async function fetchSeasonSnapshot(seasonId){
-  const r = await fetch(`${API()}/season/${encodeURIComponent(seasonId)}/prices`);
+  const r = await fetch(`${API()}/api/season/${encodeURIComponent(seasonId)}/prices`);
   if(!r.ok){
     throw new Error(`season snapshot failed: ${r.status}`);
   }
@@ -578,7 +566,7 @@ async function runMonteCarlo(){
     return { crop_id: cid, mu: est.mu, sigma: est.sigma, seasonality_strength: est.seasonality_strength, jump_lam: 0.02, jump_mu: 0.0, jump_sig: 0.05 };
   });
   const body = { prices_now: pricesNow, weights, crop_params: cropParams, horizon_steps: 12, N: 1000 };
-  const r = await fetch(`${API()}/montecarlo`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const r = await fetch(`${API()}/api/montecarlo`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   const j = await r.json();
   if(j.percentiles){
     const p = j.percentiles["p5,p25,p50,p75,p95"];
@@ -591,7 +579,7 @@ async function runMonteCarlo(){
 async function extendSeason(steps = 12){
   if(!state.seasonId) return null;
   const diversification = state.educationalMode ? 0 : computeDiversificationHHI();
-  const r = await fetch(`${API()}/season/${encodeURIComponent(state.seasonId)}/advance`, {
+  const r = await fetch(`${API()}/api/season/${encodeURIComponent(state.seasonId)}/advance`, {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify({steps, diversification_hhi: diversification})
@@ -1160,7 +1148,7 @@ async function buildModalChart(cid){
   // fetch forecast
   let fc = {mean:[], p10:[], p90:[]};
   try{
-    const fr = await fetch(`${API()}/forecast`, {
+    const fr = await fetch(`${API()}/api/forecast`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({season_id: state.seasonId, crop_ids: [cid], horizon: 12})
     });
@@ -1330,7 +1318,7 @@ function renderTxns(){
 document.getElementById('btn-new-season').addEventListener('click', newSeason);
 document.getElementById('btn-report').addEventListener('click', async ()=>{
   if(!state.seasonId){ toast('Start a season first'); return; }
-  const r = await fetch(`${API()}/report`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({season_id: state.seasonId})});
+  const r = await fetch(`${API()}/api/report`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({season_id: state.seasonId})});
   const j = await r.json();
   if(j && j.metrics){
     const m = j.metrics;
@@ -1361,3 +1349,4 @@ document.getElementById('btn-step').addEventListener('click', async ()=>{
     console.error('macro fetch failed', e);
   }
 })();
+
