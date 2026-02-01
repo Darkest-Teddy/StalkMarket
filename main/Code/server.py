@@ -795,7 +795,6 @@ class ReportResponse(BaseModel):
 # FastAPI app & routes
 # ------------------------------
 api = FastAPI(title="FarmFinance Unified API", version="1.0.0")
-app = api  # FastAPI CLI expects `app`
 api.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 # Serve frontend if "frontend" directory exists
