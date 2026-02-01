@@ -13,8 +13,11 @@
   ],
   "routes": [
     {
+      "handle": "filesystem"
+    },
+    {
       "src": "/(.*)",
-      "dest": "public/$1"
+      "dest": "public/index.html"
     }
   ]
 }
