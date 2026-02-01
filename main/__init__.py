@@ -1,4 +1,5 @@
-# Expose the FastAPI application at package level for uvicorn/vercel
-from .Code import api  # noqa: F401
+# Expose the FastAPI application at package level for uvicorn
+from .Code.main import api  # noqa: F401
 
 __all__ = ["api"]
+
