@@ -8,7 +8,13 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://your-render-service.onrender.com/api/:path*"
+      "destination": "https://stalkmarket.onrender.com/api/:path*"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "public/$1"
     }
   ]
 }
