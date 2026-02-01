@@ -9,9 +9,11 @@ from __future__ import annotations
 import os, math, time, random, copy
 from typing import Dict, List, Optional
 from dataclasses import dataclass
+from pathlib import Path
 import numpy as np
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 try:
@@ -360,8 +362,7 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(title="FarmFinance API", version="0.3.0")
 api = app  # alias expected by uvicorn entrypoint
 
-if os.path.isdir("public"):
-    api.mount("/assets", StaticFiles(directory="public"), name="public")
+PUBLIC_DIR = (Path(__file__).resolve().parent / "public").resolve()
 
 __all__ = ["app", "api"]
 
@@ -645,6 +646,36 @@ def demo_seed(season_id: str = "S1"):
     res = simulate(SimulateRequest(season_id=season_id, seed=123, steps=52, crop_params=cps,
                                    start_prices={c["id"]: 100.0 for c in DEFAULT_CROPS}))
     return {"ok": True, "season_id": season_id, "n_prices": len(res.prices), "macro": res.macro}
+
+def _safe_public_path(relative: str) -> Optional[Path]:
+    """
+    Resolve a path inside ``public`` safely, ensuring callers can't escape the directory.
+    Returns None if the folder is missing or the file doesn't exist.
+    """
+    if not PUBLIC_DIR.exists():
+        return None
+    candidate = (PUBLIC_DIR / relative).resolve()
+    try:
+        candidate.relative_to(PUBLIC_DIR)
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
+
+
+@api.get("/", include_in_schema=False)
+def serve_index():
+    index_path = _safe_public_path("index.html")
+    if index_path:
+        return FileResponse(index_path)
+    return {"message": "Farm Finance API", "status": "online"}
+
+
+@api.get("/{asset_path:path}", include_in_schema=False)
+def serve_public_asset(asset_path: str):
+    file_path = _safe_public_path(asset_path)
+    if file_path:
+        return FileResponse(file_path)
+    raise HTTPException(404, "Not Found")
 
 if __name__ == "__main__":
     import uvicorn
