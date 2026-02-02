@@ -6,13 +6,15 @@
 const API = () => window.API_BASE || '';
 
 // ---------- Global State ----------
+const INITIAL_CASH_BALANCE = 10000;
+
 const state = {
   seasonId: null,
   prices: {},     // {cropId: [prices...]}
   crops: [],      // cropIds
   events: [],
   macro: {},
-  cash: 10000,
+  cash: INITIAL_CASH_BALANCE,
   holdings: {},   // {cropId: qty}
   shorts: {},     // {cropId: qty}
   txns: [],
@@ -38,6 +40,7 @@ const STATE_CACHE_KEY = `STALK_STATE_V${STATE_CACHE_VERSION}`;
 const STATE_CACHE_DEBOUNCE_MS = 350;
 const MAX_TXN_CACHE = 120;
 let stateCacheTimer = null;
+let backgroundPausedClock = false;
 
 const safeStorage = () => {
   try {
@@ -116,6 +119,14 @@ function scheduleStatePersist(reason = 'update') {
     stateCacheTimer = null;
     persistStateNow(reason);
   }, STATE_CACHE_DEBOUNCE_MS);
+}
+
+function flushStateCache(reason = 'flush') {
+  if (stateCacheTimer) {
+    clearTimeout(stateCacheTimer);
+    stateCacheTimer = null;
+  }
+  persistStateNow(reason);
 }
 
 function restorePersistedState() {
@@ -375,6 +386,23 @@ function latestPrices(){
   return last;
 }
 
+function normalizedCashBalance(){
+  return Number.isFinite(state.cash) ? state.cash : INITIAL_CASH_BALANCE;
+}
+
+function computeNetWorth(){
+  const last = latestPrices();
+  let wealth = normalizedCashBalance();
+  for(const cid of state.crops){
+    const price = last[cid] || 0;
+    const qty = state.holdings[cid] || 0;
+    const shortQty = state.shorts[cid] || 0;
+    wealth += qty * price;
+    wealth -= shortQty * price;
+  }
+  return wealth;
+}
+
 function titleize(id){
   if(!id) return '';
   return id.replace(/[_-]/g, ' ').replace(/\b\w/g, (c)=>c.toUpperCase());
@@ -458,6 +486,12 @@ function setupIntroOverlay(){
   }
 
   renderGarden();
+}
+
+function hideIntroOverlayImmediate(){
+  const overlay = document.getElementById('intro-overlay');
+  if(!overlay) return;
+  overlay.classList.add('opacity-0','pointer-events-none','hidden');
 }
 
 function resetTimeline(){
@@ -641,6 +675,7 @@ async function getMacro() {
 async function newSeason() {
   if(state.starting) return;
   state.starting = true;
+  const carryCash = computeNetWorth();
   try{
     const r = await fetch(`${API()}/api/demo_seed`, {method: 'POST'});
     const j = await r.json();
@@ -654,11 +689,13 @@ async function newSeason() {
     const events = snapshot.events;
     const macro = await getMacro();
 
+    const nextCash = Number.isFinite(carryCash) ? carryCash : INITIAL_CASH_BALANCE;
+
     state.seasonId = seasonId;
     state.crops = crops;
     state.events = (events || []).slice().sort((a,b)=>a.ts - b.ts);
     state.macro = macro;
-    state.cash = 10000;
+    state.cash = nextCash;
     state.holdings = {};
     state.shorts = {};
     state.txns = [];
@@ -1116,9 +1153,11 @@ function renderShorts(){
 
 function renderPortfolio(){
   // Compute total value
+  const cashBalance = normalizedCashBalance();
+  state.cash = cashBalance;
   const last = latestPrices();
   let plants = 0;
-  let value = state.cash;
+  let value = cashBalance;
   let growth = 0;
   for(const cid of state.crops){
     const qty = state.holdings[cid] || 0;
@@ -1497,6 +1536,7 @@ document.getElementById('btn-step').addEventListener('click', async ()=>{
   const restored = restorePersistedState();
   setupIntroOverlay();
   if(restored){
+    hideIntroOverlayImmediate();
     toast('Welcome back! Your last season was restored.');
   } else {
     updateSeasonBadge(null);
@@ -1512,4 +1552,33 @@ document.getElementById('btn-step').addEventListener('click', async ()=>{
     console.error('macro fetch failed', e);
   }
 })();
+
+window.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    backgroundPausedClock = state.timerRunning;
+    if (state.timerRunning) {
+      pauseClock();
+    }
+    flushStateCache('visibility-hide');
+  } else if (document.visibilityState === 'visible') {
+    if (backgroundPausedClock) {
+      toast('Clock paused while you were away. Tap Resume to keep growing.');
+      backgroundPausedClock = false;
+    }
+  }
+});
+window.addEventListener('pagehide', () => {
+  if (state.timerRunning) {
+    pauseClock();
+    backgroundPausedClock = true;
+  }
+  flushStateCache('pagehide');
+});
+window.addEventListener('beforeunload', () => {
+  if (state.timerRunning) {
+    pauseClock();
+    backgroundPausedClock = true;
+  }
+  flushStateCache('beforeunload');
+});
 
