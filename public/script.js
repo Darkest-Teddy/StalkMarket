@@ -44,6 +44,7 @@ const RESET_CONFIRM_TIMEOUT_MS = 4500;
 let stateCacheTimer = null;
 let resetConfirming = false;
 let resetConfirmTimer = null;
+let toastTimer = null;
 
 const safeStorage = () => {
   try {
@@ -452,10 +453,18 @@ const fmtSigned = (n) => {
 const pct = (x) => ((x >= 0 ? '+' : '') + (100 * x).toFixed(2) + '%');
 
 function toast(msg) {
-  const t = document.getElementById('toast');
-  document.getElementById('toast-message').textContent = msg;
-  t.classList.remove('hidden');
-  setTimeout(() => t.classList.add('hidden'), 2600);
+  const container = document.getElementById('toast');
+  const messageEl = document.getElementById('toast-message');
+  if(!container || !messageEl) return;
+  messageEl.textContent = msg;
+  container.classList.remove('hidden');
+  if(toastTimer){
+    clearTimeout(toastTimer);
+  }
+  toastTimer = setTimeout(() => {
+    container.classList.add('hidden');
+    toastTimer = null;
+  }, 2600);
 }
 
 function sum(arr){ return arr.reduce((a,b)=>a+b,0); }
@@ -1038,8 +1047,9 @@ function renderMarket(){
   const grid = document.getElementById('plant-cards');
   grid.innerHTML = '';
   if(!state.crops.length){
-    grid.innerHTML = `<div class="col-span-full bg-white border border-dashed border-gray-300 rounded-lg p-6 text-center text-gray-500">
-      No plants yet. Start a season to populate the market garden.
+    grid.innerHTML = `<div class="col-span-full wood-panel pixel-panel pixel-thin p-6 text-center beige-text">
+      <p class="font-semibold text-lg">No plants yet.</p>
+      <p class="text-sm opacity-80">Start a season to populate the market garden.</p>
     </div>`;
     return;
   }
