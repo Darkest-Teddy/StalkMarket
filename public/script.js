@@ -471,6 +471,8 @@ function resetTimeline(){
   state.timelineComplete = false;
 }
 
+const INITIAL_SEASON_STEP = 1;
+
 function initTimeline(prices){
   resetTimeline();
   state.fullHistory = {};
@@ -479,12 +481,16 @@ function initTimeline(prices){
   Object.entries(prices).forEach(([cid, series])=>{
     const arr = Array.isArray(series) ? [...series] : [];
     state.fullHistory[cid] = arr;
-    state.prices[cid] = arr.length ? [...arr] : [];
     if(arr.length){
       max = Math.max(max, arr.length - 1);
     }
   });
-  state.currentStep = max;
+  const startStep = Math.min(INITIAL_SEASON_STEP, max);
+  Object.entries(state.fullHistory).forEach(([cid, history])=>{
+    const visibleEnd = Math.min(history.length, startStep + 1);
+    state.prices[cid] = history.slice(0, visibleEnd);
+  });
+  state.currentStep = startStep;
   state.maxStep = max;
   state.timelineComplete = false;
   renderClock();
