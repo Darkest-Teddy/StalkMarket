@@ -33,6 +33,146 @@ const state = {
   gardenSprites: {},
 };
 
+const STATE_CACHE_VERSION = 1;
+const STATE_CACHE_KEY = `STALK_STATE_V${STATE_CACHE_VERSION}`;
+const STATE_CACHE_DEBOUNCE_MS = 350;
+const MAX_TXN_CACHE = 120;
+let stateCacheTimer = null;
+
+const safeStorage = () => {
+  try {
+    return window.localStorage;
+  } catch (err) {
+    console.warn('[storage] unavailable', err);
+    return null;
+  }
+};
+
+function updateSeasonBadge(seasonId) {
+  const el = document.getElementById('season-id');
+  if (el) {
+    el.textContent = seasonId || '—';
+  }
+}
+
+const clonePersistable = (payload) => JSON.parse(JSON.stringify(payload));
+
+function snapshotStateForCache() {
+  return clonePersistable({
+    seasonId: state.seasonId,
+    prices: state.prices,
+    crops: state.crops,
+    events: state.events,
+    macro: state.macro,
+    cash: state.cash,
+    holdings: state.holdings,
+    shorts: state.shorts,
+    txns: state.txns,
+    fullHistory: state.fullHistory,
+    currentStep: state.currentStep,
+    maxStep: state.maxStep,
+    timelineComplete: state.timelineComplete,
+    costBasis: state.costBasis,
+    shortBasis: state.shortBasis,
+    educationalMode: state.educationalMode,
+    gardenSprites: state.gardenSprites,
+    tickIntervalMs: state.tickIntervalMs,
+  });
+}
+
+function clearPersistedState() {
+  const storage = safeStorage();
+  if (!storage) return;
+  storage.removeItem(STATE_CACHE_KEY);
+}
+
+function persistStateNow(reason = 'update') {
+  const storage = safeStorage();
+  if (!storage) return;
+  if (!state.seasonId) {
+    clearPersistedState();
+    return;
+  }
+  try {
+    const payload = {
+      version: STATE_CACHE_VERSION,
+      savedAt: Date.now(),
+      reason,
+      data: snapshotStateForCache(),
+    };
+    storage.setItem(STATE_CACHE_KEY, JSON.stringify(payload));
+  } catch (err) {
+    console.warn('[storage] persist failed', err);
+  }
+}
+
+function scheduleStatePersist(reason = 'update') {
+  const storage = safeStorage();
+  if (!storage || !state.seasonId) return;
+  if (stateCacheTimer) {
+    clearTimeout(stateCacheTimer);
+  }
+  stateCacheTimer = setTimeout(() => {
+    stateCacheTimer = null;
+    persistStateNow(reason);
+  }, STATE_CACHE_DEBOUNCE_MS);
+}
+
+function restorePersistedState() {
+  const storage = safeStorage();
+  if (!storage) return false;
+  const raw = storage.getItem(STATE_CACHE_KEY);
+  if (!raw) return false;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.version !== STATE_CACHE_VERSION || !parsed.data || !parsed.data.seasonId) {
+      return false;
+    }
+    const data = parsed.data;
+    state.seasonId = data.seasonId;
+    state.prices = data.prices || {};
+    state.crops = Array.isArray(data.crops) ? data.crops : [];
+    state.events = Array.isArray(data.events) ? data.events : [];
+    state.macro = data.macro || {};
+    state.cash = Number.isFinite(data.cash) ? data.cash : state.cash;
+    state.holdings = data.holdings || {};
+    state.shorts = data.shorts || {};
+    state.txns = Array.isArray(data.txns) ? data.txns.slice(0, MAX_TXN_CACHE) : [];
+    state.fullHistory = data.fullHistory || {};
+    state.currentStep = Number.isFinite(data.currentStep) ? data.currentStep : 0;
+    state.maxStep = Number.isFinite(data.maxStep) ? data.maxStep : 0;
+    state.timelineComplete = !!data.timelineComplete;
+    state.costBasis = data.costBasis || {};
+    state.shortBasis = data.shortBasis || {};
+    state.educationalMode = !!data.educationalMode;
+    state.gardenSprites = data.gardenSprites || {};
+    state.tickIntervalMs = Number.isFinite(data.tickIntervalMs) ? data.tickIntervalMs : state.tickIntervalMs;
+    state.timerRunning = false;
+    state.timerId = null;
+    state.extending = false;
+    state.starting = false;
+    storage.setItem('STALK_EDU_MODE', state.educationalMode ? '1' : '0');
+    updateSeasonBadge(state.seasonId);
+    renderMacro();
+    renderMarket();
+    renderPortfolio();
+    renderTxns();
+    renderClock();
+    hydrateEventPopups();
+    return true;
+  } catch (err) {
+    console.warn('[storage] restore failed', err);
+    return false;
+  }
+}
+
+function recordTxn(entry) {
+  state.txns.unshift(entry);
+  if (state.txns.length > MAX_TXN_CACHE) {
+    state.txns.length = MAX_TXN_CACHE;
+  }
+}
+
 const CROPS_META = {
   wheat: {
     name: 'Wealthy Wheat',
@@ -287,6 +427,7 @@ function applyEducationalMode(enabled){
       btn.classList.add('bg-gray-200','text-gray-800');
     }
   }
+  scheduleStatePersist('edu-mode');
 }
 
 function setupIntroOverlay(){
@@ -499,7 +640,7 @@ async function newSeason() {
     const j = await r.json();
     if(!j.ok){ throw new Error('demo seed failed'); }
     const seasonId = j.season_id || 'S1';
-    document.getElementById('season-id').textContent = seasonId;
+    updateSeasonBadge(seasonId);
 
     const snapshot = await fetchSeasonSnapshot(seasonId);
     const history = extendHistoryBackward(snapshot.prices);
@@ -530,6 +671,7 @@ async function newSeason() {
     hydrateEventPopups();
     startClock();
     toast('New season started!');
+    scheduleStatePersist('new-season');
   }catch(err){
     console.error(err);
     toast('Season start failed. Check backend server.');
@@ -627,6 +769,7 @@ async function ensureFutureSteps(){
     }
     renderClock();
     hydrateEventPopups();
+    scheduleStatePersist('extend-season');
   }catch(err){
     console.error(err);
     toast('Unable to extend market timeline. Start a new season.');
@@ -691,6 +834,7 @@ async function advanceTick(manual = false){
   if(eventsThisStep.length){
     eventsThisStep.forEach(triggerEventPopup);
   }
+  scheduleStatePersist('advance-tick');
   return true;
 }
 
@@ -1221,12 +1365,13 @@ function executeBuy(){
   const totalCost = prevQty * prevBasis + cost;
   state.holdings[currentCrop] = newQty;
   state.costBasis[currentCrop] = newQty ? totalCost / newQty : 0;
-  state.txns.unshift({t: Date.now(), type:'BUY', cid: currentCrop, qty, price});
+  recordTxn({t: Date.now(), type:'BUY', cid: currentCrop, qty, price});
   playPlantingSound();
   renderPortfolio();
   renderTxns();
   updateTradeTotal();
   toast(`Bought ${qty} ${currentCrop}`);
+  scheduleStatePersist('trade-buy');
 }
 
 function executeSell(){
@@ -1242,12 +1387,13 @@ function executeSell(){
     state.holdings[currentCrop] = 0;
     state.costBasis[currentCrop] = 0;
   }
-  state.txns.unshift({t: Date.now(), type:'SELL', cid: currentCrop, qty, price});
+  recordTxn({t: Date.now(), type:'SELL', cid: currentCrop, qty, price});
   playPlantingSound();
   renderPortfolio();
   renderTxns();
   updateTradeTotal();
   toast(`Sold ${qty} ${currentCrop}`);
+  scheduleStatePersist('trade-sell');
 }
 
 function executeShort(){
@@ -1262,12 +1408,13 @@ function executeShort(){
   const totalBorrow = prevQty * prevBasis + qty * price;
   state.shorts[currentCrop] = newQty;
   state.shortBasis[currentCrop] = newQty ? totalBorrow / newQty : 0;
-  state.txns.unshift({t: Date.now(), type:'SHORT', cid: currentCrop, qty, price});
+  recordTxn({t: Date.now(), type:'SHORT', cid: currentCrop, qty, price});
   playPlantingSound();
   renderPortfolio();
   renderTxns();
   updateTradeTotal();
   toast(`Borrowed ${qty} ${currentCrop} and sold short`);
+  scheduleStatePersist('trade-short');
 }
 
 function executeCover(){
@@ -1284,12 +1431,13 @@ function executeCover(){
     state.shorts[currentCrop] = 0;
     state.shortBasis[currentCrop] = 0;
   }
-  state.txns.unshift({t: Date.now(), type:'COVER', cid: currentCrop, qty, price});
+  recordTxn({t: Date.now(), type:'COVER', cid: currentCrop, qty, price});
   playPlantingSound();
   renderPortfolio();
   renderTxns();
   updateTradeTotal();
   toast(`Covered ${qty} ${currentCrop}`);
+  scheduleStatePersist('trade-cover');
 }
 
 function renderTxns(){
@@ -1305,11 +1453,11 @@ function renderTxns(){
     else if(x.type === 'SHORT') color = 'text-yellow-600';
     else if(x.type === 'COVER') color = 'text-blue-700';
     const meta = cropMeta(x.cid);
-    return `<div class="flex justify-between items-center px-4 py-2 border-b border-gray-100">
-      <div class="${color} font-semibold">${x.type}</div>
-      <div class="font-mono">${meta.name}</div>
-      <div class="font-mono">qty ${x.qty}</div>
-      <div class="font-mono">${fmt(x.price)}</div>
+    return `<div class="txn-row">
+      <span class="${color} font-semibold">${x.type}</span>
+      <span class="font-mono">${meta.name}</span>
+      <span class="font-mono">qty ${x.qty}</span>
+      <span class="font-mono text-right">${fmt(x.price)}</span>
     </div>`;
   }).join('');
 }
@@ -1340,11 +1488,20 @@ document.getElementById('btn-step').addEventListener('click', async ()=>{
 
 // ---------- Boot ----------
 (async function boot(){
+  const restored = restorePersistedState();
   setupIntroOverlay();
+  if(restored){
+    toast('Welcome back! Your last season was restored.');
+  } else {
+    updateSeasonBadge(null);
+  }
   try{
     const macro = await getMacro();
     state.macro = macro || {};
     renderMacro();
+    if(restored && state.seasonId){
+      scheduleStatePersist('macro-refresh');
+    }
   }catch(e){
     console.error('macro fetch failed', e);
   }
