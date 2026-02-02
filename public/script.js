@@ -695,7 +695,6 @@ async function getMacro() {
 async function newSeason() {
   if(state.starting) return;
   state.starting = true;
-  const carryCash = computeNetWorth();
   try{
     const r = await fetch(`${API()}/api/demo_seed`, {method: 'POST'});
     const j = await r.json();
@@ -709,19 +708,25 @@ async function newSeason() {
     const events = snapshot.events;
     const macro = await getMacro();
 
-    const nextCash = Number.isFinite(carryCash) ? carryCash : INITIAL_CASH_BALANCE;
-
     state.seasonId = seasonId;
     state.crops = crops;
     state.events = (events || []).slice().sort((a,b)=>a.ts - b.ts);
     state.macro = macro;
-    state.cash = nextCash;
-    state.holdings = {};
-    state.shorts = {};
-    state.txns = [];
-    state.costBasis = {};
-    state.shortBasis = {};
-    state.gardenSprites = {};
+    const cropSet = new Set(state.crops);
+    const filterMapByCrop = (map = {}) => {
+      const out = {};
+      Object.entries(map).forEach(([cid, value])=>{
+        if(cropSet.has(cid)){
+          out[cid] = value;
+        }
+      });
+      return out;
+    };
+    state.holdings = filterMapByCrop(state.holdings);
+    state.shorts = filterMapByCrop(state.shorts);
+    state.costBasis = filterMapByCrop(state.costBasis);
+    state.shortBasis = filterMapByCrop(state.shortBasis);
+    state.gardenSprites = filterMapByCrop(state.gardenSprites);
     initTimeline(history);
 
     renderMacro();
