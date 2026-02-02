@@ -81,6 +81,13 @@ function resetAncillaryFlags(){
   storage.removeItem(RESUME_ON_LAUNCH_KEY);
 }
 
+function refreshStartButtonLabel(){
+  const startBtn = document.getElementById('start-button');
+  if(startBtn){
+    startBtn.textContent = state.seasonId ? 'Return to Market' : 'Launch Market';
+  }
+}
+
 function updateSeasonBadge(seasonId) {
   const el = document.getElementById('season-id');
   if (el) {
@@ -181,14 +188,64 @@ function clearResetConfirmation(){
   updateResetButton(false);
 }
 
-function performFullReset(){
+function showIntroOverlay(){
+  const overlay = document.getElementById('intro-overlay');
+  if(!overlay) return;
+  overlay.classList.remove('hidden');
+  overlay.classList.remove('opacity-0');
+  overlay.classList.remove('pointer-events-none');
+  refreshStartButtonLabel();
+}
+
+function resetStateObject(){
   pauseClock();
+  resetTimeline();
+  state.seasonId = null;
+  state.prices = {};
+  state.crops = [];
+  state.events = [];
+  state.macro = {};
+  state.cash = INITIAL_CASH_BALANCE;
+  state.holdings = {};
+  state.shorts = {};
+  state.txns = [];
+  state.charts = {};
+  state.fullHistory = {};
+  state.costBasis = {};
+  state.shortBasis = {};
+  state.extending = false;
+  state.timelineComplete = false;
+  state.eventPopups = [];
+  state.educationalMode = false;
+  state.starting = false;
+  state.gardenSprites = {};
+  audioState.unlocked = false;
+  if(audioState.soundtrack){
+    audioState.soundtrack.pause();
+    audioState.soundtrack.currentTime = 0;
+  }
+  if(audioState.planting){
+    audioState.planting.currentTime = 0;
+  }
+  applyEducationalMode(false);
+  updateSeasonBadge(null);
+  refreshStartButtonLabel();
+  renderMacro();
+  renderMarket();
+  renderPortfolio();
+  renderTxns();
+  renderClock();
+  hydrateEventPopups();
+}
+
+function performFullReset(){
   clearPersistedState();
   resetAncillaryFlags();
   markResumeOnLaunch(false);
+  resetStateObject();
+  showIntroOverlay();
   clearResetConfirmation();
-  toast('Progress wiped. Reloading...');
-  setTimeout(()=> window.location.reload(), 350);
+  toast('Progress wiped. Launch a new market when ready.');
 }
 
 function handleResetButton(){
