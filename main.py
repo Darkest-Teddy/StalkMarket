@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException, APIRouter
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from persistence import init_persistence, persist_season_state, persist_report_stats
 try:
     from importlib.resources import files as resource_files
 except ImportError:
@@ -200,6 +201,8 @@ class Storage:
 
 DB = Storage()
 
+init_persistence(DB)
+
 DEFAULT_CROPS = [
     dict(id="wheat",   name="Wheat",   cls="bond_like",  base_mu=0.03, base_sigma=0.08, seas=0.05, kappa=0.0, jump_lam=0.00, j_mu=0.0,  j_sig=0.00),
     dict(id="corn",    name="Corn",    cls="blue_chip",  base_mu=0.07, base_sigma=0.16, seas=0.07, kappa=0.0, jump_lam=0.02, j_mu=-0.01,j_sig=0.05),
@@ -352,6 +355,7 @@ class FitRiskResponse(BaseModel):
 class ReportRequest(BaseModel):
     season_id: str
     rf_rate: float = 0.01
+    player_id: Optional[str] = None
 
 class ReportResponse(BaseModel):
     season_id: str
@@ -491,6 +495,7 @@ def advance_season(season_id: str, req: AdvanceRequest):
             rec = {"ts": t, "crop_id": cid, "price": price}
             DB.prices[season_id].append(rec)
             new_prices.append(rec)
+    persist_season_state(DB, season_id)
     return {"season_id": season_id, "prices": new_prices, "events": new_events}
 
 @api_router.post("/simulate", response_model=SimulateResponse)
@@ -535,6 +540,7 @@ def simulate(req: SimulateRequest):
             shock = engine.log_return_shock(cid)
             P[cid] = float(base_next * math.exp(shock))
             DB.prices[season_id].append({"ts": t, "crop_id": cid, "price": float(P[cid])})
+    persist_season_state(DB, season_id)
     return SimulateResponse(season_id=season_id, prices=DB.prices[season_id], events=DB.events[season_id], macro=macro)
 
 @api_router.post("/forecast", response_model=ForecastResponse)
@@ -662,6 +668,7 @@ def report(req: ReportRequest):
                  recession=season_meta.get("recession",False), asof=season_meta.get("asof",None))
     counterfactual = dict(horizon_steps=6, wealth_percentiles=mc.percentiles, risk=mc.var_es,
                           note="If you waited a bit, median outcome improves but worst-case risk widens.")
+    persist_report_stats(req.season_id, metrics, req.player_id)
     return ReportResponse(season_id=req.season_id, metrics=metrics,
                           diversification=dict(HHI=HHI, N_eff=N_eff, corr=C.tolist(), crops=crop_ids),
                           market_exposure=dict(alpha=alpha, beta=beta), behavior=dict(), tips=tips,
