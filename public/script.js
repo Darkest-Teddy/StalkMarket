@@ -37,10 +37,10 @@ const state = {
 
 const STATE_CACHE_VERSION = 1;
 const STATE_CACHE_KEY = `STALK_STATE_V${STATE_CACHE_VERSION}`;
+const RESUME_ON_LAUNCH_KEY = 'STALK_RESUME_ON_LAUNCH';
 const STATE_CACHE_DEBOUNCE_MS = 350;
 const MAX_TXN_CACHE = 120;
 let stateCacheTimer = null;
-let backgroundPausedClock = false;
 
 const safeStorage = () => {
   try {
@@ -50,6 +50,26 @@ const safeStorage = () => {
     return null;
   }
 };
+
+function markResumeOnLaunch(flag){
+  const storage = safeStorage();
+  if(!storage) return;
+  if(flag){
+    storage.setItem(RESUME_ON_LAUNCH_KEY, '1');
+  }else{
+    storage.removeItem(RESUME_ON_LAUNCH_KEY);
+  }
+}
+
+function consumeResumeOnLaunch(){
+  const storage = safeStorage();
+  if(!storage) return false;
+  const should = storage.getItem(RESUME_ON_LAUNCH_KEY) === '1';
+  if(should){
+    storage.removeItem(RESUME_ON_LAUNCH_KEY);
+  }
+  return should;
+}
 
 function updateSeasonBadge(seasonId) {
   const el = document.getElementById('season-id');
@@ -80,6 +100,7 @@ function snapshotStateForCache() {
     educationalMode: state.educationalMode,
     gardenSprites: state.gardenSprites,
     tickIntervalMs: state.tickIntervalMs,
+    timerRunning: state.timerRunning,
   });
 }
 
@@ -158,7 +179,7 @@ function restorePersistedState() {
     state.educationalMode = !!data.educationalMode;
     state.gardenSprites = data.gardenSprites || {};
     state.tickIntervalMs = Number.isFinite(data.tickIntervalMs) ? data.tickIntervalMs : state.tickIntervalMs;
-    state.timerRunning = false;
+    state.timerRunning = !!data.timerRunning;
     state.timerId = null;
     state.extending = false;
     state.starting = false;
@@ -475,23 +496,22 @@ function setupIntroOverlay(){
   }
 
   if(startBtn){
+    startBtn.textContent = state.seasonId ? 'Return to Market' : 'Launch Market';
     startBtn.addEventListener('click', async ()=>{
       if(overlay){
         overlay.classList.add('opacity-0','pointer-events-none');
         setTimeout(()=> overlay.classList.add('hidden'), 400);
       }
       unlockAudio();
+      if(state.seasonId){
+        toast('Resuming your current season.');
+        return;
+      }
       await newSeason();
     });
   }
 
   renderGarden();
-}
-
-function hideIntroOverlayImmediate(){
-  const overlay = document.getElementById('intro-overlay');
-  if(!overlay) return;
-  overlay.classList.add('opacity-0','pointer-events-none','hidden');
 }
 
 function resetTimeline(){
@@ -1534,12 +1554,19 @@ document.getElementById('btn-step').addEventListener('click', async ()=>{
 // ---------- Boot ----------
 (async function boot(){
   const restored = restorePersistedState();
+  const autoResumeRequested = consumeResumeOnLaunch();
   setupIntroOverlay();
   if(restored){
-    hideIntroOverlayImmediate();
     toast('Welcome back! Your last season was restored.');
+    if(autoResumeRequested && state.seasonId && !state.timelineComplete){
+      startClock();
+      toast('Clock resumed automatically.');
+    } else {
+      markResumeOnLaunch(false);
+    }
   } else {
     updateSeasonBadge(null);
+    markResumeOnLaunch(false);
   }
   try{
     const macro = await getMacro();
@@ -1555,29 +1582,26 @@ document.getElementById('btn-step').addEventListener('click', async ()=>{
 
 window.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
-    backgroundPausedClock = state.timerRunning;
-    if (state.timerRunning) {
-      pauseClock();
-    }
     flushStateCache('visibility-hide');
-  } else if (document.visibilityState === 'visible') {
-    if (backgroundPausedClock) {
-      toast('Clock paused while you were away. Tap Resume to keep growing.');
-      backgroundPausedClock = false;
-    }
   }
 });
+
 window.addEventListener('pagehide', () => {
   if (state.timerRunning) {
+    markResumeOnLaunch(true);
     pauseClock();
-    backgroundPausedClock = true;
+  } else {
+    markResumeOnLaunch(false);
   }
   flushStateCache('pagehide');
 });
+
 window.addEventListener('beforeunload', () => {
   if (state.timerRunning) {
+    markResumeOnLaunch(true);
     pauseClock();
-    backgroundPausedClock = true;
+  } else {
+    markResumeOnLaunch(false);
   }
   flushStateCache('beforeunload');
 });
