@@ -40,7 +40,10 @@ const STATE_CACHE_KEY = `STALK_STATE_V${STATE_CACHE_VERSION}`;
 const RESUME_ON_LAUNCH_KEY = 'STALK_RESUME_ON_LAUNCH';
 const STATE_CACHE_DEBOUNCE_MS = 350;
 const MAX_TXN_CACHE = 120;
+const RESET_CONFIRM_TIMEOUT_MS = 4500;
 let stateCacheTimer = null;
+let resetConfirming = false;
+let resetConfirmTimer = null;
 
 const safeStorage = () => {
   try {
@@ -69,6 +72,13 @@ function consumeResumeOnLaunch(){
     storage.removeItem(RESUME_ON_LAUNCH_KEY);
   }
   return should;
+}
+
+function resetAncillaryFlags(){
+  const storage = safeStorage();
+  if(!storage) return;
+  storage.removeItem('STALK_EDU_MODE');
+  storage.removeItem(RESUME_ON_LAUNCH_KEY);
 }
 
 function updateSeasonBadge(seasonId) {
@@ -148,6 +158,54 @@ function flushStateCache(reason = 'flush') {
     stateCacheTimer = null;
   }
   persistStateNow(reason);
+}
+
+function updateResetButton(confirming = false){
+  const btn = document.getElementById('btn-reset');
+  if(!btn) return;
+  if(confirming){
+    btn.textContent = 'CONFIRM RESET';
+    btn.classList.add('animate-pulse');
+  }else{
+    btn.textContent = 'RESET PROGRESS';
+    btn.classList.remove('animate-pulse');
+  }
+}
+
+function clearResetConfirmation(){
+  if(resetConfirmTimer){
+    clearTimeout(resetConfirmTimer);
+    resetConfirmTimer = null;
+  }
+  resetConfirming = false;
+  updateResetButton(false);
+}
+
+function performFullReset(){
+  pauseClock();
+  clearPersistedState();
+  resetAncillaryFlags();
+  markResumeOnLaunch(false);
+  clearResetConfirmation();
+  toast('Progress wiped. Reloading...');
+  setTimeout(()=> window.location.reload(), 350);
+}
+
+function handleResetButton(){
+  if(resetConfirming){
+    performFullReset();
+    return;
+  }
+  resetConfirming = true;
+  updateResetButton(true);
+  toast('Press reset again to erase all progress.');
+  if(resetConfirmTimer){
+    clearTimeout(resetConfirmTimer);
+  }
+  resetConfirmTimer = setTimeout(()=>{
+    clearResetConfirmation();
+    toast('Reset canceled.');
+  }, RESET_CONFIRM_TIMEOUT_MS);
 }
 
 function restorePersistedState() {
@@ -1555,6 +1613,11 @@ document.getElementById('btn-step').addEventListener('click', async ()=>{
   pauseClock();
   await advanceTick(true);
 });
+const resetBtn = document.getElementById('btn-reset');
+if(resetBtn){
+  updateResetButton(false);
+  resetBtn.addEventListener('click', handleResetButton);
+}
 
 // ---------- Boot ----------
 (async function boot(){

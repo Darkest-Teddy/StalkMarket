@@ -269,6 +269,21 @@ h1, h2, h3, h4 {
     box-shadow: 0 0 0 var(--btn-blue-border) !important;
 }
 
+#btn-reset {
+    background: #7f1d1d !important;
+    border-color: #450a0a !important;
+    box-shadow: 0 var(--pixel) 0 #450a0a !important;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+#btn-reset:hover {
+    background: #661010 !important;
+}
+#btn-reset:active {
+    transform: translateY(var(--pixel));
+    box-shadow: 0 0 0 #450a0a !important;
+}
+
 .pixel-header {
     background: #507238; /* lighter transparent green (restored) */
     border-bottom: var(--pixel) solid #0a2f1d;

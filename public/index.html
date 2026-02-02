@@ -146,9 +146,12 @@ Welcome to the Stalk Market simulator, designed to let you explore trading strat
 
     <!-- Market Section -->
     <section class="mb-12">
-      <div class="flex items-center justify-between mb-4">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
         <h3 class="text-2xl font-display font-semibold text-gray-900 section-heading">Market Garden</h3>
-        <button id="btn-mc" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Peek Risk (Monte Carlo)</button>
+        <div class="flex items-center gap-3">
+          <button id="btn-mc" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Peek Risk (Monte Carlo)</button>
+          <button id="btn-reset" class="bg-red-700 text-white px-4 py-2 rounded-lg border border-red-900 hover:bg-red-800 uppercase tracking-wide">RESET PROGRESS</button>
+        </div>
       </div>
       <div id="plant-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"></div>
     </section>
