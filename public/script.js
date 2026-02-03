@@ -1677,7 +1677,6 @@ document.getElementById('btn-step').addEventListener('click', async ()=>{
     await newSeason();
     return;
   }
-  pauseClock();
   await advanceTick(true);
 });
 const resetBtn = document.getElementById('btn-reset');
